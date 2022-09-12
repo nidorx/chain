@@ -1,3 +1,6 @@
+// Copyright 2022 Alex Rodin. All rights reserved.
+// Based on the httprouter package, Copyright 2013 Julien Schmidt.
+
 package chain
 
 import (
