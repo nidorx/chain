@@ -18,6 +18,16 @@ type Router struct {
 
 	contextPool sync.Pool
 
+	Crypto chainCrypto
+
+	// A secret key used to verify and encrypt cookies.
+	//
+	// The field must be set manually whenever one of those features are used.
+	//
+	// This data must be kept in the connection and never used directly, always use router.Crypto.keyGenerator.Generate()
+	// to derive keys from it
+	SecretKeyBase string
+
 	// Cached value of global (*) getAllowedHeader methods
 	globalAllowed string
 
@@ -116,21 +126,6 @@ func (r *Router) PATCH(route string, handle interface{}) {
 // DELETE is a shortcut for router.handleFunc(http.MethodDelete, Route, handle)
 func (r *Router) DELETE(route string, handle interface{}) {
 	r.Handle(http.MethodDelete, route, handle)
-}
-
-type responseWriterSpy struct {
-	http.ResponseWriter
-	wrote bool
-}
-
-func (w *responseWriterSpy) WriteHeader(status int) {
-	w.wrote = true
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *responseWriterSpy) Write(b []byte) (int, error) {
-	w.wrote = true
-	return w.ResponseWriter.Write(b)
 }
 
 // Handle registers a new Route for the given method and path.
@@ -273,11 +268,18 @@ func (r *Router) Use(args ...interface{}) *Router {
 			})
 		case func(*Context, func() error) error:
 			middlewares = append(middlewares, arg)
+		case MiddlewareWithInitHandler:
+			handler := arg
+			handler.Init(r)
+			middlewares = append(middlewares, handler.Handle)
+		case MiddlewareHandler:
+			handler := arg
+			middlewares = append(middlewares, handler.Handle)
 		case http.Handler:
 			// compatibility with http.Handle
 			handler := arg
 			middlewares = append(middlewares, func(ctx *Context, next func() error) error {
-				spy := &responseWriterSpy{ResponseWriter: ctx.Writer}
+				spy := &ResponseWriterSpy{ResponseWriter: ctx.Writer}
 				handler.ServeHTTP(spy, ctx.Request)
 				if spy.wrote {
 					return nil
@@ -342,6 +344,12 @@ func (r *Router) Lookup(method string, path string) (*Route, *Context) {
 
 // ServeHTTP responds to the given request.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+
+	// to control state
+	w = &ResponseWriterSpy{
+		ResponseWriter: w,
+	}
+
 	defer r.panicRecover(w, req)
 
 	//   if (r.XPoweredBy != "" ('x-powered-by')) res.setHeader('X-Powered-By', 'SyntaxChain');
@@ -449,6 +457,7 @@ func (r *Router) getContext(req *http.Request, w http.ResponseWriter, path strin
 	ctx.Writer = w
 	ctx.Request = req
 	ctx.paramCount = 0
+	ctx.SecretKeyBase = r.SecretKeyBase
 
 	if req != nil {
 		ctx.path = req.URL.Path
@@ -464,6 +473,7 @@ func (r *Router) putContext(ctx *Context) {
 	ctx.router = nil
 	ctx.Writer = nil
 	ctx.Request = nil
+	ctx.data = nil
 	r.contextPool.Put(ctx)
 }
 

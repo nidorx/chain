@@ -11,6 +11,15 @@ const (
 	wildcard  = '*'
 )
 
+type MiddlewareHandler interface {
+	Handle(ctx *Context, next func() error) error
+}
+
+type MiddlewareWithInitHandler interface {
+	Init(*Router)
+	Handle(ctx *Context, next func() error) error
+}
+
 type Handle func(*Context) error
 
 type Middleware struct {

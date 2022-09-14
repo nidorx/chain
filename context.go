@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type chainContextKey struct{}
@@ -25,11 +26,40 @@ type Context struct {
 	path              string
 	paramNames        [32]string
 	paramValues       [32]string
+	data              map[interface{}]interface{}
+	handler           Handle
+	router            *Router
 	MatchedRoutePath  string
 	Writer            http.ResponseWriter
 	Request           *http.Request
-	handler           Handle
-	router            *Router
+	Crypto            *chainCrypto
+
+	// A secret key used to verify and encrypt cookies.
+	//
+	// The field must be set manually whenever one of those features are used.
+	//
+	// This data must be kept in the connection and never used directly, always use router.Crypto.keyGenerator.Generate()
+	// to derive keys from it
+	SecretKeyBase string
+}
+
+// Set define um valor compartilhado no contexto de execução da requisição
+func (ctx *Context) Set(key interface{}, value interface{}) {
+	if ctx.data == nil {
+		ctx.data = make(map[interface{}]interface{})
+	}
+	ctx.data[key] = value
+}
+
+// Get obtém um valor compartilhado no contexto de execução da requisição
+func (ctx *Context) Get(key interface{}) interface{} {
+	if ctx.data == nil {
+		return nil
+	}
+	if value, exists := ctx.data[key]; exists {
+		return value
+	}
+	return nil
 }
 
 // GetParam returns the value of the first Param which key matches the given name.
@@ -151,6 +181,43 @@ func (ctx *Context) Write(data []byte) (int, error) {
 // an "Expect: 100-continue" header.
 func (ctx *Context) WriteHeader(statusCode int) {
 	ctx.Writer.WriteHeader(statusCode)
+}
+
+// SetCookie adds a Set-Cookie header to the provided ResponseWriter's headers.
+// The provided cookie must have a valid Name. Invalid cookies may be silently dropped.
+func (ctx *Context) SetCookie(cookie *http.Cookie) {
+	http.SetCookie(ctx.Writer, cookie)
+}
+
+// DeleteCookie delete a cookie by name
+func (ctx *Context) DeleteCookie(name string) {
+	http.SetCookie(ctx.Writer, &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Expires:  time.Now(),
+		MaxAge:   -1,
+	})
+}
+
+// GetCookie returns the named cookie provided in the request or nil if not found.
+// If multiple cookies match the given name, only one cookie will be returned.
+func (ctx *Context) GetCookie(name string) *http.Cookie {
+	if cookie, err := ctx.Request.Cookie(name); err != nil {
+		return cookie
+	}
+	return nil
+}
+
+// RegisterBeforeSend Registers a callback to be invoked before the response is sent.
+//
+// Callbacks are invoked in the reverse order they are defined (callbacks defined first are invoked last).
+func (ctx *Context) RegisterBeforeSend(callback func()) error {
+	if spy, is := ctx.Writer.(*ResponseWriterSpy); is {
+		return spy.registerBeforeSend(callback)
+	}
+	return nil
 }
 
 func (ctx *Context) parsePathSegments() {
