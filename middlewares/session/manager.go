@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-type privateManagerKey struct{}
+var globalManagers = map[*chain.Router]*Manager{}
 
 var (
-	sessionKey     = "syntax.chain.session" // Session on chain.Context
-	managerKey     = privateManagerKey{}    // Manager on chain.Context
+	sessionKey     = "syntax.chain.session."         // Session on chain.Context
+	managerKey     = "syntax.chain.session-manager." // Manager on chain.Context
 	ErrCannotFetch = errors.New("cannot fetch session, check if there is a session.Manager configured")
 )
 
@@ -22,32 +22,26 @@ type Manager struct {
 	Store Store // session store module (required)
 }
 
-// @TODO: func FetchByKey(ctx *chain.Context, key string) (*Session, error)
+func (m *Manager) Init(method string, path string, router *chain.Router) {
 
-// Fetch LazyLoad session from context
-func Fetch(ctx *chain.Context) (*Session, error) {
-
-	if value := ctx.Get(sessionKey); value != nil {
-		if session, valid := value.(*Session); valid {
-			return session, nil
-		}
-	}
-
-	if value := ctx.Get(managerKey); value != nil {
-		if manager, valid := value.(*Manager); valid {
-			return manager.fetch(ctx)
-		}
-	}
-
-	return nil, ErrCannotFetch
-}
-
-func (m *Manager) Init(router *chain.Router) {
 	if m.Store == nil {
+		m.Store = &Cookie{
+			CryptoOptions:   CryptoOptions{},
+			Serializer:      nil,
+			Log:             "",
+			RotatingOptions: nil,
+		}
 		panic(any("session.Manager: Store is required"))
 	}
 	if strings.TrimSpace(m.Key) == "" {
 		panic(any("session.Manager: Key is required"))
+	}
+
+	if (method == "" || method == "*") && (path == "" || path == "*" || path == "/*") {
+		if _, exist := globalManagers[router]; !exist {
+			panic(any("session.Manager: There is already a global session.Manager registered for this chain.Router"))
+		}
+		globalManagers[router] = m
 	}
 
 	if err := m.Store.Init(m.Config, router); err != nil {
@@ -56,7 +50,7 @@ func (m *Manager) Init(router *chain.Router) {
 }
 
 func (m *Manager) Handle(ctx *chain.Context, next func() error) error {
-	ctx.Set(managerKey, m)
+	ctx.Set(managerKey+m.Key, m)
 	return next()
 }
 
@@ -75,7 +69,7 @@ func (m *Manager) fetch(ctx *chain.Context) (*Session, error) {
 		// new session
 		session = &Session{data: map[string]any{}, state: write}
 	}
-	ctx.Set(sessionKey, session)
+	ctx.Set(sessionKey+m.Key, session)
 	if err := ctx.RegisterBeforeSend(func() { m.beforeSend(ctx, sid, session) }); err != nil {
 		return nil, err
 	}
@@ -126,4 +120,31 @@ func (m *Manager) setCookie(ctx *chain.Context, rawCookie string) {
 		Raw:        m.Raw,
 		Unparsed:   m.Unparsed,
 	})
+}
+
+// FetchByKey LazyLoad session from context using a session.Manager Key
+func FetchByKey(ctx *chain.Context, key string) (*Session, error) {
+	if value := ctx.Get(sessionKey + key); value != nil {
+		if session, valid := value.(*Session); valid {
+			return session, nil
+		}
+	}
+
+	if value := ctx.Get(managerKey + key); value != nil {
+		if manager, valid := value.(*Manager); valid {
+			return manager.fetch(ctx)
+		}
+	}
+
+	return nil, ErrCannotFetch
+}
+
+// Fetch LazyLoad session from context. It only returns result if there is a global session.Manager configured
+func Fetch(ctx *chain.Context) (*Session, error) {
+	router := ctx.Router()
+	if manager, exist := globalManagers[router]; exist {
+		return manager.fetch(ctx)
+	}
+
+	return nil, ErrCannotFetch
 }

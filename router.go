@@ -270,7 +270,7 @@ func (r *Router) Use(args ...interface{}) *Router {
 			middlewares = append(middlewares, arg)
 		case MiddlewareWithInitHandler:
 			handler := arg
-			handler.Init(r)
+			handler.Init(methodP, path, r)
 			middlewares = append(middlewares, handler.Handle)
 		case MiddlewareHandler:
 			handler := arg

@@ -16,7 +16,7 @@ type MiddlewareHandler interface {
 }
 
 type MiddlewareWithInitHandler interface {
-	Init(*Router)
+	Init(method string, path string, router *Router)
 	Handle(ctx *Context, next func() error) error
 }
 

@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"github.com/segmentio/ksuid"
 	"net/http"
 	"strings"
 	"time"
@@ -112,6 +113,11 @@ func (ctx *Context) Dispose() {
 	}
 }
 
+// Router get current router reference
+func (ctx *Context) Router() *Router {
+	return ctx.router
+}
+
 // Header returns the header map that will be sent by
 // WriteHeader. The Header map also is the mechanism with which
 // Handlers can set HTTP trailers.
@@ -134,6 +140,52 @@ func (ctx *Context) Dispose() {
 // their value to nil.
 func (ctx *Context) Header() http.Header {
 	return ctx.Writer.Header()
+}
+
+// SetHeader sets the header entries associated with key to the single element value. It replaces any existing values
+// associated with key. The key is case insensitive; it is canonicalized by textproto.CanonicalMIMEHeaderKey.
+// To use non-canonical keys, assign to the map directly.
+func (ctx *Context) SetHeader(key, value string) {
+	ctx.Writer.Header().Set(key, value)
+}
+
+// AddHeader adds the key, value pair to the header.
+// It appends to any existing values associated with key.
+// The key is case insensitive; it is canonicalized by CanonicalHeaderKey.
+func (ctx *Context) AddHeader(key, value string) {
+	ctx.Writer.Header().Add(key, value)
+}
+
+// GetHeader gets the first value associated with the given key. If there are no values associated with the key,
+// GetHeader returns "".
+// It is case insensitive; textproto.CanonicalMIMEHeaderKey is used to canonicalize the provided key. Get assumes
+// that all keys are stored in canonical form. To use non-canonical keys, access the map directly.
+func (ctx *Context) GetHeader(key string) string {
+	return ctx.Writer.Header().Get(key)
+}
+
+// Error replies to the request with the specified error message and HTTP code.
+// It does not otherwise end the request; the caller should ensure no further writes are done to w.
+// The error message should be plain text.
+func (ctx *Context) Error(error string, code int) {
+	http.Error(ctx.Writer, error, code)
+}
+
+// NotFound replies to the request with an HTTP 404 not found error.
+func (ctx *Context) NotFound() {
+	http.NotFound(ctx.Writer, ctx.Request)
+}
+
+// Redirect replies to the request with a redirect to url, which may be a path relative to the request path.
+//
+// The provided code should be in the 3xx range and is usually StatusMovedPermanently, StatusFound or StatusSeeOther.
+//
+// If the Content-Type header has not been set, Redirect sets it to "text/html; charset=utf-8" and writes a small HTML
+// body.
+//
+// Setting the Content-Type header to any value, including nil, disables that behavior.
+func (ctx *Context) Redirect(url string, code int) {
+	http.Redirect(ctx.Writer, ctx.Request, url, code)
 }
 
 // Write writes the data to the connection as part of an HTTP reply.
@@ -189,6 +241,15 @@ func (ctx *Context) SetCookie(cookie *http.Cookie) {
 	http.SetCookie(ctx.Writer, cookie)
 }
 
+// GetCookie returns the named cookie provided in the request or nil if not found.
+// If multiple cookies match the given name, only one cookie will be returned.
+func (ctx *Context) GetCookie(name string) *http.Cookie {
+	if cookie, err := ctx.Request.Cookie(name); err != nil {
+		return cookie
+	}
+	return nil
+}
+
 // DeleteCookie delete a cookie by name
 func (ctx *Context) DeleteCookie(name string) {
 	http.SetCookie(ctx.Writer, &http.Cookie{
@@ -201,15 +262,6 @@ func (ctx *Context) DeleteCookie(name string) {
 	})
 }
 
-// GetCookie returns the named cookie provided in the request or nil if not found.
-// If multiple cookies match the given name, only one cookie will be returned.
-func (ctx *Context) GetCookie(name string) *http.Cookie {
-	if cookie, err := ctx.Request.Cookie(name); err != nil {
-		return cookie
-	}
-	return nil
-}
-
 // RegisterBeforeSend Registers a callback to be invoked before the response is sent.
 //
 // Callbacks are invoked in the reverse order they are defined (callbacks defined first are invoked last).
@@ -218,6 +270,16 @@ func (ctx *Context) RegisterBeforeSend(callback func()) error {
 		return spy.registerBeforeSend(callback)
 	}
 	return nil
+}
+
+// NewUID get a new KSUID.
+//
+// KSUID is for K-Sortable Unique IDentifier. It is a kind of globally unique identifier similar to a RFC 4122 UUID,
+// built from the ground-up to be "naturally" sorted by generation timestamp without any special type-aware logic.
+//
+// See: https://github.com/segmentio/ksuid
+func (ctx *Context) NewUID() (uid string) {
+	return ksuid.New().String()
 }
 
 func (ctx *Context) parsePathSegments() {

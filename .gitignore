@@ -15,3 +15,4 @@
 # vendor/
 /_ignore/
 /.idea/
+.DS_Store
