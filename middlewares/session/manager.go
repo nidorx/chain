@@ -38,7 +38,7 @@ func (m *Manager) Init(method string, path string, router *chain.Router) {
 	}
 
 	if (method == "" || method == "*") && (path == "" || path == "*" || path == "/*") {
-		if _, exist := globalManagers[router]; !exist {
+		if _, exist := globalManagers[router]; exist {
 			panic(any("session.Manager: There is already a global session.Manager registered for this chain.Router"))
 		}
 		globalManagers[router] = m
@@ -70,7 +70,7 @@ func (m *Manager) fetch(ctx *chain.Context) (*Session, error) {
 		session = &Session{data: map[string]any{}, state: write}
 	}
 	ctx.Set(sessionKey+m.Key, session)
-	if err := ctx.RegisterBeforeSend(func() { m.beforeSend(ctx, sid, session) }); err != nil {
+	if err := ctx.BeforeSend(func() { m.beforeSend(ctx, sid, session) }); err != nil {
 		return nil, err
 	}
 	return session, nil

@@ -27,7 +27,7 @@ type Context struct {
 	path              string
 	paramNames        [32]string
 	paramValues       [32]string
-	data              map[interface{}]interface{}
+	data              map[any]any
 	handler           Handle
 	router            *Router
 	MatchedRoutePath  string
@@ -42,18 +42,27 @@ type Context struct {
 	// This data must be kept in the connection and never used directly, always use router.Crypto.keyGenerator.Generate()
 	// to derive keys from it
 	SecretKeyBase string
+	root          *Context
+	children      []*Context
 }
 
 // Set define um valor compartilhado no contexto de execução da requisição
-func (ctx *Context) Set(key interface{}, value interface{}) {
+func (ctx *Context) Set(key any, value any) {
+	if ctx.root != nil {
+		ctx.root.Set(key, value)
+	}
 	if ctx.data == nil {
-		ctx.data = make(map[interface{}]interface{})
+		ctx.data = make(map[any]any)
 	}
 	ctx.data[key] = value
 }
 
 // Get obtém um valor compartilhado no contexto de execução da requisição
-func (ctx *Context) Get(key interface{}) interface{} {
+func (ctx *Context) Get(key any) any {
+	if ctx.root != nil {
+		return ctx.root.Get(key)
+	}
+
 	if ctx.data == nil {
 		return nil
 	}
@@ -87,11 +96,11 @@ func (ctx *Context) addParameter(name string, value string) {
 }
 
 func (ctx *Context) WithParams(names []string, values []string) *Context {
-	var context *Context
+	var child *Context
 	if ctx.router != nil {
-		context = ctx.router.getContext(ctx.Request, ctx.Writer, "")
+		child = ctx.router.GetContext(ctx.Request, ctx.Writer, "")
 	} else {
-		context = &Context{
+		child = &Context{
 			Writer:      ctx.Writer,
 			Request:     ctx.Request,
 			handler:     ctx.handler,
@@ -101,16 +110,22 @@ func (ctx *Context) WithParams(names []string, values []string) *Context {
 		}
 	}
 	for i := 0; i < len(names); i++ {
-		context.paramNames[i] = names[i]
-		context.paramValues[i] = values[i]
+		child.paramNames[i] = names[i]
+		child.paramValues[i] = values[i]
 	}
-	return context
-}
 
-func (ctx *Context) Dispose() {
-	if ctx.router != nil {
-		ctx.router.putContext(ctx)
+	if ctx.root == nil {
+		child.root = ctx
+	} else {
+		child.root = ctx.root
 	}
+
+	if child.root.children == nil {
+		child.root.children = make([]*Context, 0)
+	}
+	child.root.children = append(child.root.children, child)
+
+	return child
 }
 
 // Router get current router reference
@@ -244,7 +259,8 @@ func (ctx *Context) SetCookie(cookie *http.Cookie) {
 // GetCookie returns the named cookie provided in the request or nil if not found.
 // If multiple cookies match the given name, only one cookie will be returned.
 func (ctx *Context) GetCookie(name string) *http.Cookie {
-	if cookie, err := ctx.Request.Cookie(name); err != nil {
+	// @todo: ctx.Request.readCookies is slow
+	if cookie, err := ctx.Request.Cookie(name); err == nil {
 		return cookie
 	}
 	return nil
@@ -262,14 +278,33 @@ func (ctx *Context) DeleteCookie(name string) {
 	})
 }
 
-// RegisterBeforeSend Registers a callback to be invoked before the response is sent.
+// BeforeSend Registers a callback to be invoked before the response is sent.
 //
 // Callbacks are invoked in the reverse order they are defined (callbacks defined first are invoked last).
-func (ctx *Context) RegisterBeforeSend(callback func()) error {
+func (ctx *Context) BeforeSend(callback func()) error {
 	if spy, is := ctx.Writer.(*ResponseWriterSpy); is {
-		return spy.registerBeforeSend(callback)
+		return spy.beforeSend(callback)
 	}
 	return nil
+}
+
+func (ctx *Context) AfterSend(callback func()) error {
+	if spy, is := ctx.Writer.(*ResponseWriterSpy); is {
+		return spy.afterSend(callback)
+	}
+	return nil
+}
+
+func (ctx *Context) write() {
+	if spy, is := ctx.Writer.(*ResponseWriterSpy); is {
+		if !spy.wrote {
+			ctx.WriteHeader(http.StatusOK)
+		}
+	}
+}
+
+func NewUID() (uid string) {
+	return ksuid.New().String()
 }
 
 // NewUID get a new KSUID.
@@ -279,7 +314,7 @@ func (ctx *Context) RegisterBeforeSend(callback func()) error {
 //
 // See: https://github.com/segmentio/ksuid
 func (ctx *Context) NewUID() (uid string) {
-	return ksuid.New().String()
+	return NewUID()
 }
 
 func (ctx *Context) parsePathSegments() {

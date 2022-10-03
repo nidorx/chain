@@ -6,6 +6,7 @@ package chain
 import (
 	"context"
 	"fmt"
+	"github.com/syntax-framework/chain/lib"
 	"net/http"
 	"reflect"
 	"strings"
@@ -77,64 +78,60 @@ type Router struct {
 	// Function to handle panics recovered from http handlers.
 	// It should be used to generate a error page and return the http error code 500 (Internal Server Error).
 	// The handler can be used to keep your server from crashing because of unrecovered panics.
-	PanicHandler func(http.ResponseWriter, *http.Request, interface{})
+	PanicHandler func(http.ResponseWriter, *http.Request, any)
 }
 
-func New() *Router {
-	router := &Router{
-		RedirectTrailingSlash:  true,
-		RedirectFixedPath:      true,
-		HandleMethodNotAllowed: true,
-		HandleOPTIONS:          true,
-	}
-	router.contextPool.New = func() any {
-		return &Context{}
-	}
-	return router
+func (r *Router) Group(route string) Group {
+	return &RouterGroup{p: route, r: r}
 }
 
 // GET is a shortcut for router.handleFunc(http.MethodGet, Route, handle)
-func (r *Router) GET(route string, handle interface{}) {
+func (r *Router) GET(route string, handle any) {
 	r.Handle(http.MethodGet, route, handle)
 }
 
 // HEAD is a shortcut for router.handleFunc(http.MethodHead, Route, handle)
-func (r *Router) HEAD(route string, handle interface{}) {
+func (r *Router) HEAD(route string, handle any) {
 	r.Handle(http.MethodHead, route, handle)
 }
 
 // OPTIONS is a shortcut for router.handleFunc(http.MethodOptions, Route, handle)
-func (r *Router) OPTIONS(route string, handle interface{}) {
+func (r *Router) OPTIONS(route string, handle any) {
 	r.Handle(http.MethodOptions, route, handle)
 }
 
 // POST is a shortcut for router.handleFunc(http.MethodPost, Route, handle)
-func (r *Router) POST(route string, handle interface{}) {
+func (r *Router) POST(route string, handle any) {
 	r.Handle(http.MethodPost, route, handle)
 }
 
 // PUT is a shortcut for router.handleFunc(http.MethodPut, Route, handle)
-func (r *Router) PUT(route string, handle interface{}) {
+func (r *Router) PUT(route string, handle any) {
 	r.Handle(http.MethodPut, route, handle)
 }
 
 // PATCH is a shortcut for router.handleFunc(http.MethodPatch, Route, handle)
-func (r *Router) PATCH(route string, handle interface{}) {
+func (r *Router) PATCH(route string, handle any) {
 	r.Handle(http.MethodPatch, route, handle)
 }
 
 // DELETE is a shortcut for router.handleFunc(http.MethodDelete, Route, handle)
-func (r *Router) DELETE(route string, handle interface{}) {
+func (r *Router) DELETE(route string, handle any) {
 	r.Handle(http.MethodDelete, route, handle)
 }
 
+// Configure allows a RouteConfigurator to perform route configurations
+func (r *Router) Configure(route string, configurator RouteConfigurator) {
+	configurator.Configure(r, route)
+}
+
 // Handle registers a new Route for the given method and path.
-func (r *Router) Handle(method string, path string, handle interface{}) {
+func (r *Router) Handle(method string, route string, handle any) {
 	if method == "" {
 		panic(any("method must not be empty"))
 	}
-	if len(path) < 1 || path[0] != '/' {
-		panic(any("path must begin with '/' in path '" + path + "'"))
+	if len(route) < 1 || route[0] != '/' {
+		panic(any("path must begin with '/' in path '" + route + "'"))
 	}
 	if handle == nil {
 		panic(any("handle must not be nil"))
@@ -154,37 +151,37 @@ func (r *Router) Handle(method string, path string, handle interface{}) {
 	}
 
 	if handler, valid := handle.(Handle); valid {
-		registry.addHandle(path, handler)
+		registry.addHandle(route, handler)
 	} else if handler, valid := handle.(func(*Context) error); valid {
-		registry.addHandle(path, handler)
+		registry.addHandle(route, handler)
 	} else if handler, valid := handle.(func(*Context)); valid {
-		registry.addHandle(path, func(ctx *Context) error {
+		registry.addHandle(route, func(ctx *Context) error {
 			handler(ctx)
 			return nil
 		})
 	} else if handler, valid := handle.(http.Handler); valid {
-		registry.addHandle(path, func(ctx *Context) error {
+		registry.addHandle(route, func(ctx *Context) error {
 			reqCtx := ctx.Request.Context()
 			reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
 			handler.ServeHTTP(ctx.Writer, ctx.Request.WithContext(reqCtx))
 			return nil
 		})
 	} else if handler, valid := handle.(http.HandlerFunc); valid {
-		registry.addHandle(path, func(ctx *Context) error {
+		registry.addHandle(route, func(ctx *Context) error {
 			reqCtx := ctx.Request.Context()
 			reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
 			handler.ServeHTTP(ctx.Writer, ctx.Request.WithContext(reqCtx))
 			return nil
 		})
 	} else if handler, valid := handle.(func(w http.ResponseWriter, r *http.Request)); valid {
-		registry.addHandle(path, func(ctx *Context) error {
+		registry.addHandle(route, func(ctx *Context) error {
 			reqCtx := ctx.Request.Context()
 			reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
 			handler(ctx.Writer, ctx.Request.WithContext(reqCtx))
 			return nil
 		})
 	} else if handler, valid := handle.(func(w http.ResponseWriter, r *http.Request) error); valid {
-		registry.addHandle(path, func(ctx *Context) error {
+		registry.addHandle(route, func(ctx *Context) error {
 			reqCtx := ctx.Request.Context()
 			reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
 			return handler(ctx.Writer, ctx.Request.WithContext(reqCtx))
@@ -214,7 +211,7 @@ func (r *Router) Handle(method string, path string, handle interface{}) {
 //	    println(ctx.GetParam("filepath"))
 //	    return ctx.NextFunc()
 //	})
-func (r *Router) Use(args ...interface{}) *Router {
+func (r *Router) Use(args ...any) Group {
 	var path string
 	var methodP string
 	var middlewares []func(ctx *Context, next func() error) error
@@ -332,11 +329,11 @@ func (r *Router) Use(args ...interface{}) *Router {
 // Lookup finds the Route and parameters for the given Route and assigns them to the given Context.
 func (r *Router) Lookup(method string, path string) (*Route, *Context) {
 	if registry := r.registries[method]; registry != nil {
-		ctx := r.getContext(nil, nil, path)
+		ctx := r.GetContext(nil, nil, path)
 		if route := registry.findHandle(ctx); route != nil {
 			return route, ctx
 		} else {
-			r.putContext(ctx)
+			r.PutContext(ctx)
 		}
 	}
 	return nil, nil
@@ -345,16 +342,22 @@ func (r *Router) Lookup(method string, path string) (*Route, *Context) {
 // ServeHTTP responds to the given request.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
-	// to control state
-	w = &ResponseWriterSpy{
-		ResponseWriter: w,
-	}
+	w = &ResponseWriterSpy{ResponseWriter: w}
 
 	defer r.panicRecover(w, req)
 
-	//   if (r.XPoweredBy != "" ('x-powered-by')) res.setHeader('X-Powered-By', 'SyntaxChain');
-	ctx := r.getContext(req, w, "")
-	defer r.putContext(ctx)
+	ctx := r.GetContext(req, w, "")
+
+	defer func() {
+		// if necessary, write header on exit
+		ctx.write()
+	}()
+
+	go func() {
+		// clear context when connection is closed
+		<-ctx.Request.Context().Done()
+		r.PutContext(ctx)
+	}()
 
 	path := req.URL.Path
 
@@ -396,7 +399,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 			// Try to fix the request path
 			if r.RedirectFixedPath {
-				ctx2 := &Context{path: CleanPath(path)}
+				ctx2 := &Context{path: lib.PathClean(path)}
 				ctx2.parsePathSegments()
 				if fixed := registry.findHandleCaseInsensitive(ctx2); fixed != nil {
 					req.URL.Path = fixed.Path.ReplacePath(ctx2)
@@ -450,8 +453,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// getContext returns a new ContextImpl from the pool.
-func (r *Router) getContext(req *http.Request, w http.ResponseWriter, path string) *Context {
+// GetContext returns a new ContextImpl from the pool.
+func (r *Router) GetContext(req *http.Request, w http.ResponseWriter, path string) *Context {
 	ctx := r.contextPool.Get().(*Context)
 	ctx.router = r
 	ctx.Writer = w
@@ -468,12 +471,19 @@ func (r *Router) getContext(req *http.Request, w http.ResponseWriter, path strin
 	return ctx
 }
 
-// Close frees up resources and is automatically called in the ServeHTTP part of the web server.
-func (r *Router) putContext(ctx *Context) {
+// PutContext Close frees up resources and is automatically called in the ServeHTTP part of the web server.
+func (r *Router) PutContext(ctx *Context) {
+	if ctx.children != nil {
+		for _, child := range ctx.children {
+			r.PutContext(child)
+		}
+		ctx.children = nil
+	}
 	ctx.router = nil
 	ctx.Writer = nil
 	ctx.Request = nil
 	ctx.data = nil
+	ctx.root = nil
 	r.contextPool.Put(ctx)
 }
 

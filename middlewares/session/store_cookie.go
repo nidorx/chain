@@ -25,35 +25,14 @@
 package session
 
 import (
-	"encoding/json"
 	"errors"
 	"github.com/syntax-framework/chain"
 	"strings"
 )
 
-type Serializer interface {
-	Encode(v map[string]any) ([]byte, error)
-	Decode(data []byte) (map[string]any, error)
-}
-
-type JsonSerializer struct {
-}
-
-func (s *JsonSerializer) Encode(v map[string]any) ([]byte, error) {
-	return json.Marshal(v)
-}
-
-func (s *JsonSerializer) Decode(data []byte) (map[string]any, error) {
-	output := map[string]any{}
-	if err := json.Unmarshal(data, output); err != nil {
-		return nil, err
-	}
-	return output, nil
-}
-
 var ErrSecretKeyBaseEmpty = errors.New("cookie store expects SecretKeyBase or router.SecretKeyBase to be set")
 var ErrSecretKeyBaseLen = errors.New("cookie store expects SecretKeyBase to be at least 64 bytes")
-var defaultSerializer = &JsonSerializer{}
+var defaultSerializer = &chain.JsonSerializer{}
 
 type CryptoOptions struct {
 	SecretKeyBase  string // the secret key base to built the cookie signing/encryption on top of.
@@ -69,9 +48,9 @@ type CryptoOptions struct {
 // https://funcptr.net/2013/08/25/user-sessions,-what-data-should-be-stored-where-/
 type Cookie struct {
 	CryptoOptions
-	Serializer      Serializer      // cookie serializer module that defines `Encode(any)` and `Decode(any)`. Defaults to `json`.
-	Log             string          // Log level to use when the cookie cannot be decoded. Defaults to `debug`, can be set to false to disable it.
-	RotatingOptions []CryptoOptions // additional list of options to use when decrypting and verifying the cookie. These options
+	Serializer      chain.Serializer // cookie serializer module that defines `Encode(any)` and `Decode(any)`. Defaults to `json`.
+	Log             string           // Log level to use when the cookie cannot be decoded. Defaults to `debug`, can be set to false to disable it.
+	RotatingOptions []CryptoOptions  // additional list of options to use when decrypting and verifying the cookie. These options
 	//  are used only when the cookie could not be decoded using primary options and are fetched on init so they cannot be
 	//  changed in runtime. Defaults to `[]`.
 }
@@ -133,6 +112,21 @@ func (c *Cookie) Init(config Config, router *chain.Router) (err error) {
 }
 
 func (c *Cookie) Get(ctx *chain.Context, rawCookie string) (sid string, data map[string]any) {
+	var (
+		err        error
+		serialized []byte
+		binary     = []byte(rawCookie)
+	)
+
+	if serialized, err = c.readRawCookie(binary, &c.CryptoOptions); err == nil {
+		var decoded any
+		if decoded, err = c.Serializer.Decode(serialized, &map[string]any{}); err == nil {
+			data = *decoded.(*map[string]any)
+			return
+		} else {
+			println(err)
+		}
+	}
 
 	options := []CryptoOptions{
 		{
@@ -149,18 +143,15 @@ func (c *Cookie) Get(ctx *chain.Context, rawCookie string) (sid string, data map
 		options = append(options, c.RotatingOptions...)
 	}
 
-	var (
-		err        error
-		serialized []byte
-		binary     = []byte(rawCookie)
-	)
 	for _, option := range options {
 		if serialized, err = c.readRawCookie(binary, &option); err != nil {
 			continue
 		}
-		if data, err = c.Serializer.Decode(serialized); err != nil {
+		var decoded any
+		if decoded, err = c.Serializer.Decode(serialized, &map[string]any{}); err != nil {
 			println(err)
 		}
+		data = *decoded.(*map[string]any)
 		break
 	}
 	return

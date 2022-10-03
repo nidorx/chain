@@ -1,0 +1,54 @@
+
+body {
+    font-family: 'Open Sans', sans-serif;
+    background: #D5B3DE;
+    font-size: 1.0em;
+    line-height: 1.4em;
+    overflow-x: hidden;
+}
+
+.c1 {
+    color: #58A6FF;
+}
+
+.c2 {
+    color: #FF5598;
+}
+
+.container {
+    width: 75%;
+    height: 100%;
+    padding: 20px;
+    background-color: #fff;
+    top: 100px;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: auto;
+}
+
+#chat-box {
+    border: 1px #000 solid;
+    padding: 0 0 0 5px;
+    min-height: 157px;
+    max-height: 225px;
+    overflow: scroll;
+}
+
+#chat-form {
+    width: 250px;
+}
+
+#chat-form input[type="text"] {
+    width: 250px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    margin-top: 5px;
+}
+
+#chat-form textarea {
+    width: 250px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    margin-top: 5px;
+}

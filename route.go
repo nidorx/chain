@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"fmt"
 	"log"
 	"strings"
 )
@@ -10,6 +11,10 @@ const (
 	parameter = ':'
 	wildcard  = '*'
 )
+
+type RouteConfigurator interface {
+	Configure(router *Router, path string)
+}
 
 type MiddlewareHandler interface {
 	Handle(ctx *Context, next func() error) error
@@ -55,11 +60,10 @@ func (r *Route) Dispatch(ctx *Context) error {
 		match, names, values := middleware.Path.Match(ctx)
 		if match {
 			var nextErr error
-			ctxMid := ctx
 			calledNext := false
 			nextMid := func() error {
 				if calledNext {
-					log.Println("Warning: Calling next() multiple times for route " + ctxMid.path)
+					log.Println("Warning: Calling next() multiple times for route " + ctx.path)
 					return nextErr
 				}
 				calledNext = true
@@ -69,9 +73,7 @@ func (r *Route) Dispatch(ctx *Context) error {
 
 			if len(names) > 0 {
 				// middleware expects parameterizable route
-				ctxMid = ctx.WithParams(names, values)
-				defer ctxMid.Dispose()
-				return middleware.Handle(ctxMid, nextMid)
+				return middleware.Handle(ctx.WithParams(names, values), nextMid)
 			} else {
 				// use same context
 				return middleware.Handle(ctx, nextMid)
@@ -92,6 +94,13 @@ type PathDetails struct {
 	hasWildcard  bool     // possui wildcard
 	params       []string // os nomes dos parametros no path. Ex. ["category", "filepath"]
 	paramsIndex  []int    // os indices de segmentos parametricos no path. Ex. [0, 2]
+}
+
+func (d PathDetails) String() string {
+	return fmt.Sprintf(
+		`PathDetails{path: "%v", hasStatic: %v, hasParameter: %v, hasWildcard: %v, params: [%v], priority: %v, segments: [%v]}`,
+		d.path, d.hasStatic, d.hasParameter, d.hasWildcard, strings.Join(d.params, ", "), d.priority, strings.Join(d.segments, ", "),
+	)
 }
 
 func (d PathDetails) ReplacePath(ctx *Context) string {
@@ -248,8 +257,8 @@ func (d PathDetails) conflictsWith(o *PathDetails) bool {
 	return true
 }
 
-// extractPathDetails obtém informações sobre um path dinamico.
-func extractPathDetails(pathOrig string) *PathDetails {
+// ParsePathDetails obtém informações sobre um path dinamico.
+func ParsePathDetails(pathOrig string) *PathDetails {
 
 	// uses a path with at the beginning and end to facilitate the loop (details.segments++ rule)
 	if !strings.HasPrefix(pathOrig, string(separator)) {

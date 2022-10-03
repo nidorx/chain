@@ -32,18 +32,18 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-package chain
+package lib
 
 import (
 	"strings"
 	"testing"
 )
 
-type cleanPathTest struct {
+type pathCleanTest struct {
 	path, result string
 }
 
-var cleanTests = []cleanPathTest{
+var pathCleanTests = []pathCleanTest{
 	// Already clean
 	{"/", "/"},
 	{"/abc", "/abc"},
@@ -95,25 +95,25 @@ var cleanTests = []cleanPathTest{
 	{"abc/../../././../def", "/def"},
 }
 
-func Test_Path_Clean(t *testing.T) {
-	for _, test := range cleanTests {
-		if s := CleanPath(test.path); s != test.result {
+func Test_PathClean(t *testing.T) {
+	for _, test := range pathCleanTests {
+		if s := PathClean(test.path); s != test.result {
 			t.Errorf("CleanPath(%q) = %q, want %q", test.path, s, test.result)
 		}
-		if s := CleanPath(test.result); s != test.result {
+		if s := PathClean(test.result); s != test.result {
 			t.Errorf("CleanPath(%q) = %q, want %q", test.result, s, test.result)
 		}
 	}
 }
 
-func Test_Path_CleanMallocs(t *testing.T) {
+func Test_PathClean_Mallocs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping malloc count in short mode")
 	}
 
-	for _, test := range cleanTests {
+	for _, test := range pathCleanTests {
 		test := test
-		allocs := testing.AllocsPerRun(100, func() { CleanPath(test.result) })
+		allocs := testing.AllocsPerRun(100, func() { PathClean(test.result) })
 		if allocs > 0 {
 			t.Errorf("CleanPath(%q): %v allocs, want zero", test.result, allocs)
 		}
@@ -124,27 +124,27 @@ func BenchmarkPathClean(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		for _, test := range cleanTests {
-			CleanPath(test.path)
+		for _, test := range pathCleanTests {
+			PathClean(test.path)
 		}
 	}
 }
 
-func genLongPaths() (testPaths []cleanPathTest) {
+func genLongPaths() (testPaths []pathCleanTest) {
 	for i := 1; i <= 1234; i++ {
 		ss := strings.Repeat("a", i)
 
 		correctPath := "/" + ss
-		testPaths = append(testPaths, cleanPathTest{
+		testPaths = append(testPaths, pathCleanTest{
 			path:   correctPath,
 			result: correctPath,
-		}, cleanPathTest{
+		}, pathCleanTest{
 			path:   ss,
 			result: correctPath,
-		}, cleanPathTest{
+		}, pathCleanTest{
 			path:   "//" + ss,
 			result: correctPath,
-		}, cleanPathTest{
+		}, pathCleanTest{
 			path:   "/" + ss + "/b/..",
 			result: correctPath,
 		})
@@ -152,14 +152,14 @@ func genLongPaths() (testPaths []cleanPathTest) {
 	return testPaths
 }
 
-func Test_Path_Clean_Long(t *testing.T) {
+func Test_PathClean_Long(t *testing.T) {
 	cleanTests := genLongPaths()
 
 	for _, test := range cleanTests {
-		if s := CleanPath(test.path); s != test.result {
+		if s := PathClean(test.path); s != test.result {
 			t.Errorf("CleanPath(%q) = %q, want %q", test.path, s, test.result)
 		}
-		if s := CleanPath(test.result); s != test.result {
+		if s := PathClean(test.result); s != test.result {
 			t.Errorf("CleanPath(%q) = %q, want %q", test.result, s, test.result)
 		}
 	}
@@ -172,7 +172,7 @@ func BenchmarkPathCleanLong(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		for _, test := range cleanTests {
-			CleanPath(test.path)
+			PathClean(test.path)
 		}
 	}
 }

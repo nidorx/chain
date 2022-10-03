@@ -67,90 +67,91 @@ func Test_Router_API(t *testing.T) {
 	httpHandler := handlerStruct{&handler}
 
 	router := New()
-	router.GET("/GET", func(ctx *Context) error {
+	v1 := router.Group("/app").Group("/v1")
+	v1.GET("/GET", func(ctx *Context) error {
 		get = true
 		return nil
 	})
-	router.HEAD("/GET", func(ctx *Context) error {
+	v1.HEAD("/GET", func(ctx *Context) error {
 		head = true
 		return nil
 	})
-	router.OPTIONS("/GET", func(ctx *Context) error {
+	v1.OPTIONS("/GET", func(ctx *Context) error {
 		options = true
 		return nil
 	})
-	router.POST("/POST", func(ctx *Context) error {
+	v1.POST("/POST", func(ctx *Context) error {
 		post = true
 		return nil
 	})
-	router.PUT("/PUT", func(ctx *Context) error {
+	v1.PUT("/PUT", func(ctx *Context) error {
 		put = true
 		return nil
 	})
-	router.PATCH("/PATCH", func(ctx *Context) error {
+	v1.PATCH("/PATCH", func(ctx *Context) error {
 		patch = true
 		return nil
 	})
-	router.DELETE("/DELETE", func(ctx *Context) error {
+	v1.DELETE("/DELETE", func(ctx *Context) error {
 		delete = true
 		return nil
 	})
-	router.Handle(http.MethodGet, "/Handle", httpHandler)
-	router.Handle(http.MethodGet, "/HandlerFunc", func(w http.ResponseWriter, r *http.Request) {
+	v1.Handle(http.MethodGet, "/Handle", httpHandler)
+	v1.Handle(http.MethodGet, "/HandlerFunc", func(w http.ResponseWriter, r *http.Request) {
 		handlerFunc = true
 	})
 
 	w := new(mockResponseWriter)
 
-	r, _ := http.NewRequest(http.MethodGet, "/GET", nil)
+	r, _ := http.NewRequest(http.MethodGet, "/app/v1/GET", nil)
 	router.ServeHTTP(w, r)
 	if !get {
 		t.Error("routing GET failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodHead, "/GET", nil)
+	r, _ = http.NewRequest(http.MethodHead, "/app/v1/GET", nil)
 	router.ServeHTTP(w, r)
 	if !head {
 		t.Error("routing HEAD failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodOptions, "/GET", nil)
+	r, _ = http.NewRequest(http.MethodOptions, "/app/v1/GET", nil)
 	router.ServeHTTP(w, r)
 	if !options {
 		t.Error("routing OPTIONS failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodPost, "/POST", nil)
+	r, _ = http.NewRequest(http.MethodPost, "/app/v1/POST", nil)
 	router.ServeHTTP(w, r)
 	if !post {
 		t.Error("routing POST failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodPut, "/PUT", nil)
+	r, _ = http.NewRequest(http.MethodPut, "/app/v1/PUT", nil)
 	router.ServeHTTP(w, r)
 	if !put {
 		t.Error("routing PUT failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodPatch, "/PATCH", nil)
+	r, _ = http.NewRequest(http.MethodPatch, "/app/v1/PATCH", nil)
 	router.ServeHTTP(w, r)
 	if !patch {
 		t.Error("routing PATCH failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodDelete, "/DELETE", nil)
+	r, _ = http.NewRequest(http.MethodDelete, "/app/v1/DELETE", nil)
 	router.ServeHTTP(w, r)
 	if !delete {
 		t.Error("routing DELETE failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodGet, "/Handle", nil)
+	r, _ = http.NewRequest(http.MethodGet, "/app/v1/Handle", nil)
 	router.ServeHTTP(w, r)
 	if !handler {
 		t.Error("routing Handle failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodGet, "/HandlerFunc", nil)
+	r, _ = http.NewRequest(http.MethodGet, "/app/v1/HandlerFunc", nil)
 	router.ServeHTTP(w, r)
 	if !handlerFunc {
 		t.Error("routing HandlerFunc failed")
@@ -252,7 +253,7 @@ func Test_Router_OPTIONS(t *testing.T) {
 	router.ServeHTTP(w, r)
 	if !(w.Code == http.StatusOK) {
 		t.Errorf("OPTIONS handling failed: Code=%d, Header=%v", w.Code, w.Header())
-	} else if allow := w.Header().Get("Allow"); allow != "OPTIONS, POST" {
+	} else if allow := w.Header().Get("Allow"); allow != "GET, OPTIONS, POST" {
 		t.Error("unexpected Allow header value: " + allow)
 	}
 
@@ -881,7 +882,7 @@ func Test_Router_Add_and_Get(t *testing.T) {
 	}
 }
 
-func Test_Wildcard(t *testing.T) {
+func Test_Router_Wildcard(t *testing.T) {
 	router := New()
 
 	routes := [...]string{
@@ -946,7 +947,7 @@ func Test_Wildcard(t *testing.T) {
 	}
 }
 
-func Test_Wildcard_Conflict(t *testing.T) {
+func Test_Router_Wildcard_Conflict(t *testing.T) {
 	router := New()
 
 	routes := []tRoute{
@@ -983,7 +984,7 @@ func Test_Wildcard_Conflict(t *testing.T) {
 	}
 }
 
-func Test_Duplicate_Path(t *testing.T) {
+func Test_Router_Duplicate_Path(t *testing.T) {
 	router := New()
 
 	routes := [...]string{
@@ -1024,7 +1025,7 @@ func Test_Duplicate_Path(t *testing.T) {
 	}
 }
 
-func Test_Empty_Wildcard_Name(t *testing.T) {
+func Test_Router_Empty_Wildcard_Name(t *testing.T) {
 	router := New()
 
 	routes := [...]struct {
@@ -1046,7 +1047,7 @@ func Test_Empty_Wildcard_Name(t *testing.T) {
 	}
 }
 
-func Test_CatchAll_Conflict(t *testing.T) {
+func Test_Router_CatchAll_Conflict(t *testing.T) {
 	routes := []struct {
 		first  string
 		second string
@@ -1069,13 +1070,13 @@ func Test_CatchAll_Conflict(t *testing.T) {
 	}
 }
 
-func Test_Catch_Max_Params(t *testing.T) {
+func Test_Router_Catch_Max_Params(t *testing.T) {
 	router := New()
 	var route = "/cmd/*filepath"
 	router.GET(route, fakeHandler(route))
 }
 
-func Test_Double_Wildcard(t *testing.T) {
+func Test_Router_Double_Wildcard(t *testing.T) {
 	const panicMsg = "only one wildcard per path segment is allowed in"
 
 	routes := []struct {
@@ -1144,14 +1145,13 @@ func checkRequests(t *testing.T, router *Router, request tRequest) {
 			}
 		}
 	}
-
 }
 
-func catchPanic(testFunc func()) (recv interface{}) {
+func catchPanic(fn func()) (r interface{}) {
 	defer func() {
-		recv = recover()
+		r = recover()
 	}()
 
-	testFunc()
+	fn()
 	return
 }

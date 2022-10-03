@@ -32,9 +32,9 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-package chain
+package lib
 
-// CleanPath is the URL version of path.Clean, it returns a canonical URL path
+// PathClean is the URL version of path.Clean, it returns a canonical URL path
 // for p, eliminating . and .. elements.
 //
 // The following rules are applied iteratively until no further processing can
@@ -47,7 +47,7 @@ package chain
 //     that is, replace "/.." by "/" at the beginning of a path.
 //
 // If the result of this process is an empty string, "/" is returned
-func CleanPath(p string) string {
+func PathClean(p string) string {
 	const stackBufSize = 128
 
 	// Turn empty string into "/"

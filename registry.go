@@ -5,11 +5,11 @@ import "strings"
 // Registry is an algorithm-independent framework for recording routes. This division allows us to explore different
 // algorithms without breaking the contract.
 type Registry struct {
-	canBeStatic  [2048]bool
-	routeStorage *RouteStorage
-	routes       []*Route
-	middlewares  []*Middleware
-	static       map[string]*Route
+	canBeStatic [2048]bool
+	storage     *RouteStorage
+	routes      []*Route
+	middlewares []*Middleware
+	static      map[string]*Route
 }
 
 func (r *Registry) findHandle(ctx *Context) *Route {
@@ -19,11 +19,11 @@ func (r *Registry) findHandle(ctx *Context) *Route {
 		}
 	}
 
-	if r.routeStorage == nil {
+	if r.storage == nil {
 		return nil
 	}
 
-	return r.routeStorage.lookup(ctx)
+	return r.storage.lookup(ctx)
 }
 
 func (r *Registry) findHandleCaseInsensitive(ctx *Context) *Route {
@@ -35,11 +35,11 @@ func (r *Registry) findHandleCaseInsensitive(ctx *Context) *Route {
 		}
 	}
 
-	if r.routeStorage == nil {
+	if r.storage == nil {
 		return nil
 	}
 
-	return r.routeStorage.lookupCaseInsensitive(ctx)
+	return r.storage.lookupCaseInsensitive(ctx)
 }
 
 func (r *Registry) addHandle(path string, handle Handle) {
@@ -47,7 +47,7 @@ func (r *Registry) addHandle(path string, handle Handle) {
 		r.routes = []*Route{}
 	}
 
-	details := extractPathDetails(path)
+	details := ParsePathDetails(path)
 
 	// avoid conflicts
 	for _, route := range r.routes {
@@ -66,11 +66,11 @@ func (r *Registry) addHandle(path string, handle Handle) {
 		return
 	}
 
-	if r.routeStorage == nil {
-		r.routeStorage = &RouteStorage{}
+	if r.storage == nil {
+		r.storage = &RouteStorage{}
 	}
 
-	r.routeStorage.add(r.createRoute(handle, details))
+	r.storage.add(r.createRoute(handle, details))
 }
 
 func (r *Registry) createRoute(handle Handle, pathDetails *PathDetails) *Route {
@@ -99,7 +99,7 @@ func (r *Registry) addMiddleware(path string, middlewares []func(ctx *Context, n
 
 	for _, middleware := range middlewares {
 		info := &Middleware{
-			Path:   extractPathDetails(path),
+			Path:   ParsePathDetails(path),
 			Handle: middleware,
 		}
 
