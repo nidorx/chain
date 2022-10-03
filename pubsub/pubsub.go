@@ -29,7 +29,7 @@ type subscription struct {
 	dispatchers map[Dispatcher]int // incremental dispatcher subscriptions
 }
 
-// pubsub Realtime Publisher/Subscriber _ignore.service.
+// pubsub Realtime Publisher/Subscriber service.
 type pubsub struct {
 	adapters           *lib.WildcardStore[Adapter]
 	subscriptions      map[string]*subscription

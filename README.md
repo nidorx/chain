@@ -24,7 +24,7 @@ elegant and safe way.
       that key in multiple incompatible contexts.
     - **MessageVerifier**: makes it easy to generate and verify messages which are signed to prevent tampering.
     - **MessageEncryptor** is a simple way to encrypt values which get stored somewhere you don't trust.
-- Realtime Publisher/Subscriber _ignore.service.
+- Realtime Publisher/Subscriber service.
 - Socket & Channels: A socket implementation that multiplexes messages over channels.
 
 ## Installation
