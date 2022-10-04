@@ -1,3 +1,6 @@
+// Copyright 2022 Alex Rodin. All rights reserved.
+// Based on the https://github.com/elixir-plug/plug_crypto package, Copyright (c) 2018 Plataformatec.
+
 package crypto
 
 import (
@@ -17,28 +20,33 @@ type MessageVerifier struct {
 }
 
 // Sign Generates a signed message for the provided value.
+//
+// See https://www.rfc-editor.org/rfc/rfc7515#section-7
 func (v *MessageVerifier) Sign(message []byte, secret []byte, digest string) string {
 	sha2Func, digest := getSha2Func(digest)
 	algoName := hmacSha2ToAlgoName[digest]
-	plainText := v.signingInput(algoName, message)
-	signature := hmac.New(sha2Func, secret).Sum([]byte(plainText))
-	return v.encodeToken(plainText, signature)
+	signingString := v.signingInput(algoName, message)
+	hash := hmac.New(sha2Func, secret)
+	hash.Write([]byte(signingString))
+	signature := hash.Sum(nil)
+	return v.encodeToken(signingString, signature)
 }
 
 // Verify Decodes and verifies the encoded binary was not tampered with.
 func (v *MessageVerifier) Verify(signed []byte, secret []byte) (decoded []byte, err error) {
 	var (
-		algo      []byte
-		payload   []byte
-		plainText []byte
-		signature []byte
+		algo          []byte
+		payload       []byte
+		signingString []byte
+		signature     []byte
 	)
-	if algo, payload, plainText, signature, err = v.decodeToken(signed); err != nil {
+	if algo, payload, signingString, signature, err = v.decodeToken(signed); err != nil {
 		return
 	}
 	sha2Func, _ := getSha2Func(hmacSha2ToDigestType[string(algo)])
-	// signature := hmac.New(sha2Func, secret).Sum([]byte(plainText))
-	challenge := hmac.New(sha2Func, secret).Sum(plainText)
+	hash := hmac.New(sha2Func, secret)
+	hash.Write(signingString)
+	challenge := hash.Sum(nil)
 
 	if SecureBytesCompare(challenge, signature) {
 		decoded = payload
@@ -49,7 +57,6 @@ func (v *MessageVerifier) Verify(signed []byte, secret []byte) (decoded []byte, 
 }
 
 func (v *MessageVerifier) signingInput(protected []byte, payload []byte) string {
-
 	return b64NoPad.EncodeToString(protected) + "." + b64NoPad.EncodeToString(payload)
 }
 

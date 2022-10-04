@@ -1,26 +1,22 @@
 package pubsub
 
-// AdapterLocal default adapter for local message distribution (only for the current node)
-type AdapterLocal struct {
+// LocalAdapter default adapter for local message distribution (only for the current node)
+type LocalAdapter struct {
 }
 
-func (a *AdapterLocal) Name() string {
+func (a *LocalAdapter) Name() string {
 	return "dummy"
 }
 
-func (a *AdapterLocal) NodeName() string {
-	return "local"
-}
-
-func (a *AdapterLocal) Broadcast(topic string, message any) error {
+func (a *LocalAdapter) Broadcast(topic string, message any) error {
 	// do nothing
 	return nil
 }
 
-func (a *AdapterLocal) Subscribe(topic string) {
+func (a *LocalAdapter) Subscribe(topic string) {
 	// do nothing
 }
 
-func (a *AdapterLocal) Unsubscribe(topic string) {
+func (a *LocalAdapter) Unsubscribe(topic string) {
 	// do nothing
 }

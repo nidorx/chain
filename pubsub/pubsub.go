@@ -45,7 +45,7 @@ var p = &pubsub{
 
 func init() {
 	SetAdapters([]AdapterConfig{{
-		Adapter: &AdapterLocal{},
+		Adapter: &LocalAdapter{},
 		Topics:  []string{"*"},
 	}})
 }
@@ -92,7 +92,7 @@ func Broadcast(topic string, message any) (err error) {
 	if adapter := GetAdapter(topic); adapter != nil {
 		if err = adapter.Broadcast(topic, message); err == nil {
 			// local dispatch
-			dispatch(topic, message)
+			go dispatch(topic, message)
 		}
 		return
 	}

@@ -1,3 +1,6 @@
+// Copyright 2022 Alex Rodin. All rights reserved.
+// Based on the https://github.com/elixir-plug/plug_crypto package, Copyright (c) 2018 Plataformatec.
+
 package crypto
 
 import "golang.org/x/crypto/pbkdf2"

@@ -1,3 +1,6 @@
+// Copyright 2022 Alex Rodin. All rights reserved.
+// Based on the https://github.com/elixir-plug/plug_crypto package, Copyright (c) 2018 Plataformatec.
+
 package crypto
 
 import (
@@ -12,10 +15,6 @@ import (
 var (
 	A128GCM           = []byte("A128GCM")
 	ErrInvalidMessage = errors.New("invalid message")
-)
-
-const (
-	authTagLength = 16
 )
 
 // MessageEncryptor is a simple way to encrypt values which get stored somewhere you don't trust.
@@ -184,8 +183,6 @@ func (e *MessageEncryptor) encodeToken(aad, encryptedKey, cipherText []byte) str
 func (e *MessageEncryptor) decodeToken(token []byte) (
 	aad []byte, encryptedKey []byte, cipherText []byte, err error,
 ) {
-	// aad.encryptedKey.cipherText
-
 	// aad
 	rest := token[0:]
 	index := bytes.IndexByte(rest, '.')
