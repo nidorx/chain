@@ -194,8 +194,6 @@ func (h *Handler) handleJoin(message *Message, info *Session) {
 
 	socket.status = StatusJoined
 
-	// @todo: pubsub.subscribe(pubsub_server, topic, metadata: fastlane)
-
 	info.setSocket(topic, socket)
 
 	defer deleteMessage(message)
@@ -206,7 +204,6 @@ func (h *Handler) handleJoin(message *Message, info *Session) {
 	h.push(message, info)
 }
 
-// handleLeave faz processamento da solicitação de saída do channel
 func (h *Handler) handleLeave(message *Message, info *Session) {
 	topic := message.Topic
 	socket := info.GetSocket(topic)

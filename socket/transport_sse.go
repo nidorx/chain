@@ -43,8 +43,8 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 
 	// Publish the message.
 	router.POST(endpoint, func(ctx *chain.Context) {
-		var worker *Session
-		if worker = t.resumeSession(ctx, handler); worker == nil {
+		var socketSession *Session
+		if socketSession = t.resumeSession(ctx, handler); socketSession == nil {
 			ctx.WriteHeader(http.StatusGone)
 			return
 		}
@@ -55,7 +55,7 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 			return
 		}
 
-		worker.Dispatch(body)
+		socketSession.Dispatch(body)
 		ctx.WriteHeader(http.StatusOK)
 	})
 
@@ -68,10 +68,10 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 			return
 		}
 
-		var worker *Session
-		if worker = t.resumeSession(ctx, nil); worker == nil {
+		var socketSession *Session
+		if socketSession = t.resumeSession(ctx, handler); socketSession == nil {
 			var err error
-			if worker, err = t.newSession(handler, ctx, endpoint); err != nil {
+			if socketSession, err = t.newSession(handler, ctx, endpoint); err != nil {
 				ctx.Error("Could not initialize connection: "+err.Error(), http.StatusForbidden)
 				return
 			}
@@ -88,14 +88,9 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 		ctx.SetHeader("Pragma", "no-cache")
 		ctx.SetHeader("Expire", "0")
 		//ctx.SetHeader("Access-Control-Allow-Origin", "*")
-		//ctx.SetHeader("Access-Control-Allow-Methods", "GET, POST")
-		//ctx.SetHeader("Access-Control-Allow-Headers", ctx.GetHeader("Access-Control-Request-Headers"))
-		//ctx.SetHeader("Access-Control-Max-Age", "3600")
-		//ctx.SetHeader("Cache-Control", "no-cache")
-		//ctx.SetHeader("Access-Control-Allow-Origin", "*")
 		ctx.WriteHeader(http.StatusOK)
 		flusher.Flush()
-		if err := t.listen(worker, ctx, flusher); err != nil {
+		if err := t.listen(socketSession, ctx, flusher); err != nil {
 			ctx.Error(err.Error(), http.StatusInternalServerError)
 		}
 	})
@@ -136,10 +131,10 @@ func (t *TransportSSE) newSession(handler *Handler, ctx *chain.Context, endpoint
 	return
 }
 
-func (t *TransportSSE) listen(session *Session, ctx *chain.Context, flusher http.Flusher) (err error) {
+func (t *TransportSSE) listen(socketSession *Session, ctx *chain.Context, flusher http.Flusher) (err error) {
 
 	// after disconnection, schedule session shutdown
-	defer session.ScheduleShutdown(time.Second * 15)
+	defer socketSession.ScheduleShutdown(time.Second * 15)
 
 	w := ctx.Writer.(*chain.ResponseWriterSpy)
 
@@ -148,7 +143,7 @@ func (t *TransportSSE) listen(session *Session, ctx *chain.Context, flusher http
 		select {
 		case <-ctx.Request.Context().Done():
 			return
-		case msg := <-session.messages:
+		case msg := <-socketSession.messages:
 			if msg != nil {
 				if _, err = fmt.Fprintf(w, "data: %s\n\n", msg); err != nil {
 					return

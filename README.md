@@ -12,20 +12,19 @@
 
 ---
 
-Chain is a core library that seeks to provide all the necessary machinery to create distributed systems in a simple,
+Chain is a core library that tries to provide all the necessary machinery to create distributed systems in a simple,
 elegant and safe way.
 
 ## Feature Overview
 
 - Optimized HTTP Router middleware
-- Crypto-related functionality
-    - **KeyGenerator**: PBKDF2 (Password-Based Key Derivation Function 2). It can be used to derive a number of keys for
-      various purposes from a given secret. This lets applications have a single secure secret, but avoid reusing
-      that key in multiple incompatible contexts.
-    - **MessageVerifier**: makes it easy to generate and verify messages which are signed to prevent tampering.
-    - **MessageEncryptor** is a simple way to encrypt values which get stored somewhere you don't trust.
 - Realtime Publisher/Subscriber service.
 - Socket & Channels: A socket implementation that multiplexes messages over channels.
+- Crypto-related functionality
+    - **KeyGenerator**: It can be used to derive a number of keys for various purposes from a given secret. This lets
+      applications have a single secure secret, but avoid reusing that key in multiple incompatible contexts.
+    - **MessageVerifier**: makes it easy to generate and verify messages which are signed to prevent tampering.
+    - **MessageEncryptor** is a simple way to encrypt values which get stored somewhere you don't trust.
 
 ## Installation
 
@@ -96,6 +95,11 @@ func main() {
 }
 ```
 
+### More about Router
+
+- [Router docs](/docs/ROUTER.md)
+- [`/examples/router`](/examples/router)
+
 ## PubSub
 
 ![pubsub.png](docs/pubsub.png)
@@ -145,14 +149,86 @@ func main() {
 }
 ```
 
-### Adapters
+### More about PubSub
 
-Chain PubSub was designed to be flexible and support multiple backends.
-
-By default, the chain is configured with just
-the [LocalAdapter](https://github.com/syntax-framework/chain/blob/main/pubsub/pubsub_local_adapter.go).
+- [PubSub docs](/docs/PUBSUB.md)
+- [`/examples/pubsub`](/examples/pubsub)
 
 ## Socket & Channels
+
+![socket.png](docs/socket.png)
+
+A socket implementation that multiplexes messages over channels.
+
+Once connected to a socket, incoming and outgoing events are routed to channels. The incoming client data is routed to
+channels via transports. It is the responsibility of the socket to tie transports and channels together.
+
+Chain ships with a JavaScript implementation that interacts with backend and can be used as reference for those
+interested in implementing custom clients.
+
+Server
+
+```go
+package main
+
+import (
+	"github.com/syntax-framework/chain"
+	"github.com/syntax-framework/chain/socket"
+	"log"
+	"net/http"
+)
+
+func main() {
+	router := chain.New()
+
+	router.Configure("/socket", AppSocket)
+
+	if err := http.ListenAndServe(":8080", router); err != nil {
+		log.Fatalf("ListenAndServe: %v", err)
+	}
+}
+
+var AppSocket = &socket.Handler{
+	Channels: []*socket.Channel{
+		socket.NewChannel("chat:*", chatChannel),
+	},
+}
+
+func chatChannel(channel *socket.Channel) {
+
+	channel.Join("chat:lobby", func(params any, socket *socket.Socket) (reply any, err error) {
+		return
+	})
+
+	channel.HandleIn("my_event", func(event string, payload any, socket *socket.Socket) (reply any, err error) {
+		reply = "Ok"
+
+		socket.Push("other_event", map[string]any{"value": 1})
+		return
+	})
+}
+```
+
+Client (javascript)
+
+```javascript
+const socket = chain.Socket('/socket')
+socket.connect()
+
+const channel = socket.channel("chat:lobby", {param1: 'foo'})
+channel.join()
+
+channel.push('my_event', {name: $inputName.value})
+    .on('ok', (reply) => chain.log('MyEvent', reply))
+
+
+channel.on('other_event', (message) => chain.log('OtherEvent', message))
+```
+
+### More about Socket & Channels
+
+- [Socket & Channels docs](/socket/README.md)
+- [`/examples/socket-chat`](/examples/socket-chat)
 
 ## Crypto
 
@@ -194,10 +270,9 @@ println(base64.StdEncoding.EncodeToString(signSecret))
 For example, the [cookie store](https://github.com/syntax-framework/chain/blob/main/middlewares/session/store_cookie.go)
 uses this verifier to send data to the client. The data can be read by the client, but cannot be tampered with.
 
-The message and its verification are base64url encoded and returned to you.
+The message and its verification are base64url encoded and returned to you. 
 
-This is useful for cases like remember-me tokens and auto-unsubscribe links where the session store isn't suitable or
-available.
+This is useful for cases like remember-me tokens and auto-unsubscribe links.
 
 ```go
 message := []byte("This is content")
@@ -228,12 +303,10 @@ console.log(content); // This is content
 
 `MessageEncryptor` is a simple way to encrypt values which get stored somewhere you don't trust.
 
-The encrypted key is are base64url encoded and returned to you.
+The encrypted key is base64url encoded and returned to you.
 
 This can be used in situations similar to the `MessageVerifier`, but where you don't want users to be able to determine
 the value of the payload.
-
-The current algorithm used is AES-GCM-128.
 
 ```go
 data := []byte("This is content")
@@ -258,4 +331,7 @@ println(string(decrypted))
 > Note that, unlike `MessageVerifier`, the result (`encrypted`) cannot be read. Only in possession of `secret`
 > and `signSecred` is it possible to access the original content.
 
+### More about Crypto
+
+- [`/examples/crypto`](/examples/crypto)
 

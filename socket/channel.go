@@ -239,8 +239,6 @@ func (c *Channel) handleJoin(topic string, payload any, socket *Socket) (reply a
 		if handler := c.joinHandlers.Match(topic); handler != nil {
 			if reply, err = handler(payload, socket); err == nil {
 				// subscribe topic and configure fastlane
-				// Process.monitor(transport_pid)
-				// fastlane = {:fastlane, transport_pid, serializer, channel.__intercepts__()}
 				pubsub.Subscribe(topic, c)
 
 				c.socketsMutex.Lock()

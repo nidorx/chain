@@ -20,10 +20,24 @@
         Decode: decode,
         Debug: true,
         log: (group, template, ...params) => {
-            if (chain.Debug) {
+            if (typeof group === 'string' && chain[`Debug${group}`] === false) {
+                return
+            }
+            if (chain.Debug || (typeof group === 'string' && chain[`Debug${group}`])) {
+                if (typeof template !== 'string') {
+                    params = [template, ...params]
+                    template = ''
+
+                    if (typeof group !== 'string') {
+                        params = [group, ...params]
+                        group = ''
+                    }
+                }
+
                 logGroupLen = Math.max(logGroupLen, group.length)
                 console.log(
-                    `${`                           ${group}`.substr(-logGroupLen)}: ${template}`, ...params
+                    `${`                           ${group}`.substr(-logGroupLen)}: ${template}`,
+                    ...params
                 )
             }
         }
@@ -36,7 +50,7 @@
     }
 
     function decode(rawMessage) {
-        // Push      = [kind, joinRef,  0,   topic, event, payload]
+        // Push      = [kind, joinRef, ref,  topic, event, payload]
         // Reply     = [kind, joinRef, ref, status,        payload]
         // Broadcast = [kind,                topic, event, payload]
         let [kind, joinRef, ref, topic, event, payload] = JSON.parse(`[${rawMessage}]`)
@@ -153,7 +167,7 @@
         }
 
         function onConnOpen() {
-            chain.log(SOCKET, `connected to ${endpoint}`)
+            chain.log(SOCKET, 'connected to %s', endpoint)
 
             connected = true
 
@@ -174,7 +188,7 @@
         function onConnMessage(data) {
             let message = decode(data)
             let {topic, event, payload, ref, joinRef} = message
-            chain.log(SOCKET, `receive %s %s %s`,
+            chain.log(SOCKET, 'receive %s %s %s',
                 topic || '', event || '', (ref || joinRef) ? (`(${joinRef || ''}, ${ref || ''})`) : '', payload
             )
 
@@ -264,7 +278,7 @@
                 }
             })
             .on('timeout', () => {
-                chain.log(CHANNEL, `timeout ${topic} (${joinRef()})`, joinPush.timeout())
+                chain.log(CHANNEL, 'timeout %s (%s)', topic, joinRef(), joinPush.timeout())
 
                 // leave (if joined on server)
                 Push(socket, channel, 'stx_leave', {}, timeout).send()
@@ -281,7 +295,7 @@
             if (channel.isClosed()) {
                 return
             }
-            chain.log(CHANNEL, `close ${topic} ${joinRef()}`)
+            chain.log(CHANNEL, 'close %s %s', topic, joinRef())
 
             cancelOnSocketOpen();
             cancelOnSocketError();
@@ -291,7 +305,7 @@
         })
 
         channel.onError(reason => {
-            chain.log(CHANNEL, `error ${topic}`, reason)
+            chain.log(CHANNEL, 'error %s', topic, reason)
 
             if (channel.isJoining()) {
                 joinPush.reset()
@@ -365,7 +379,7 @@
             state = CHANNEL_STATE_LEAVING;
 
             let onClose = () => {
-                chain.log(CHANNEL, `leave ${topic}`)
+                chain.log(CHANNEL, 'leave %s', topic)
                 trigger('stx_close', 'leave')
             }
 

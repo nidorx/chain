@@ -17,7 +17,7 @@ func (s *MessageSerializer) Encode(v any) (data []byte, err error) {
 		return
 	}
 
-	// Push 		= [kind, joinRef, ref,   topic, event, payload]
+	// Push 		= [kind, joinRef, ref,  topic, event, payload]
 	// Reply 		= [kind, joinRef, ref, status,        payload]
 	// Broadcast 	= [kind,                topic, event, payload]
 	buf := &bytes.Buffer{}
