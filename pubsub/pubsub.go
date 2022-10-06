@@ -1,11 +1,13 @@
 package pubsub
 
 import (
-	"fmt"
-	"github.com/syntax-framework/chain/lib"
+	"github.com/rs/zerolog/log"
+	"github.com/syntax-framework/chain/pkg"
 	"sync"
 	"time"
 )
+
+var logger = log.With().Str("package", "chain.pubsub").Logger()
 
 // Adapter Specification to implement a custom PubSub adapter.
 type Adapter interface {
@@ -31,7 +33,7 @@ type subscription struct {
 
 // pubsub Realtime Publisher/Subscriber service.
 type pubsub struct {
-	adapters           *lib.WildcardStore[Adapter]
+	adapters           *pkg.WildcardStore[Adapter]
 	subscriptions      map[string]*subscription
 	unsubscribeTimers  map[string]*time.Timer
 	unsubscribeMutex   sync.Mutex
@@ -116,11 +118,13 @@ func DirectBroadcast(nodeName string, topic string, message any, dispatcher stri
 
 // SetAdapters configure the adapters topics
 func SetAdapters(adapters []AdapterConfig) {
-	p.adapters = &lib.WildcardStore[Adapter]{}
+	p.adapters = &pkg.WildcardStore[Adapter]{}
 	for _, config := range adapters {
 		for _, topic := range config.Topics {
 			if err := p.adapters.Insert(topic, config.Adapter); err != nil {
-				panic(any(fmt.Sprintf("invalid adapter config for topic %s. Cause: %s", topic, err.Error())))
+				logger.Panic().Err(err).
+					Str("topic", topic).
+					Msg("invalid adapter config")
 			}
 		}
 	}

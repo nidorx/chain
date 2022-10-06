@@ -1,9 +1,8 @@
 package chain
 
-import "embed"
+import "github.com/rs/zerolog/log"
 
-//go:embed socket/client/chain.js
-var socketClientJS embed.FS
+var logger = log.With().Str("package", "chain.router").Logger()
 
 func New() *Router {
 	router := &Router{
@@ -15,17 +14,6 @@ func New() *Router {
 	router.contextPool.New = func() any {
 		return &Context{}
 	}
-
-	router.GET("/syntax-chain.js", func(ctx *Context) {
-		clientJsBytes, _ := socketClientJS.ReadFile("socket/client/chain.js")
-		ctx.Header().Set("Content-Type", "application/javascript")
-		//"Content-Range": {r.contentRange(size)},
-		//"Content-Type":  {contentType},
-		// Content-Length
-		// Etag
-		// Last-Modified
-		ctx.Write(clientJsBytes)
-	})
 
 	return router
 }

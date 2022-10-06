@@ -32,7 +32,7 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-package lib
+package pkg
 
 // PathClean is the URL version of path.Clean, it returns a canonical URL path
 // for p, eliminating . and .. elements.

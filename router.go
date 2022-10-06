@@ -5,8 +5,7 @@ package chain
 
 import (
 	"context"
-	"fmt"
-	"github.com/syntax-framework/chain/lib"
+	"github.com/syntax-framework/chain/pkg"
 	"net/http"
 	"reflect"
 	"strings"
@@ -128,13 +127,18 @@ func (r *Router) Configure(route string, configurator RouteConfigurator) {
 // Handle registers a new Route for the given method and path.
 func (r *Router) Handle(method string, route string, handle any) {
 	if method == "" {
-		panic(any("method must not be empty"))
+		logger.Panic().
+			Msg("method must not be empty")
 	}
 	if len(route) < 1 || route[0] != '/' {
-		panic(any("path must begin with '/' in path '" + route + "'"))
+		logger.Panic().
+			Str("route", route).
+			Msg("path must begin with '/'")
 	}
 	if handle == nil {
-		panic(any("handle must not be nil"))
+		logger.Panic().
+			Str("route", route).
+			Msg("handle must not be nil")
 	}
 
 	if r.registries == nil {
@@ -187,7 +191,9 @@ func (r *Router) Handle(method string, route string, handle any) {
 			return handler(ctx.Writer, ctx.Request.WithContext(reqCtx))
 		})
 	} else {
-		panic(any(fmt.Sprintf("Handle: invalid handler %v\n", reflect.TypeOf(handle))))
+		logger.Panic().
+			Str("handler", reflect.TypeOf(handle).String()).
+			Msg("invalid handler")
 	}
 }
 
@@ -284,7 +290,9 @@ func (r *Router) Use(args ...any) Group {
 				return next()
 			})
 		default:
-			panic(any(fmt.Sprintf("use: invalid middleware %v\n", reflect.TypeOf(arg))))
+			logger.Panic().
+				Str("middleware", reflect.TypeOf(arg).String()).
+				Msg("invalid middleware")
 		}
 	}
 
@@ -399,7 +407,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 			// Try to fix the request path
 			if r.RedirectFixedPath {
-				ctx2 := &Context{path: lib.PathClean(path)}
+				ctx2 := &Context{path: pkg.PathClean(path)}
 				ctx2.parsePathSegments()
 				if fixed := registry.findHandleCaseInsensitive(ctx2); fixed != nil {
 					req.URL.Path = fixed.Path.ReplacePath(ctx2)

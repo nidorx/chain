@@ -90,7 +90,9 @@ func (c *Cookie) Init(config Config, router *chain.Router) (err error) {
 
 	// pre derive
 	if strings.TrimSpace(c.SigningSalt) == "" {
-		panic(any("cookie store expects SigningSalt"))
+		logger.Panic().
+			Str("store", c.Name()).
+			Msg("cookie store expects SigningSalt")
 	}
 	var signingSalt []byte
 	if signingSalt, err = c.derive(c.SecretKeyBase, c.SigningSalt, &c.CryptoOptions); err != nil {
@@ -124,7 +126,10 @@ func (c *Cookie) Get(ctx *chain.Context, rawCookie string) (sid string, data map
 			data = *decoded.(*map[string]any)
 			return
 		} else {
-			println(err)
+			logger.Debug().Err(err).
+				Str("store", c.Name()).
+				Str("method", "Cookie.Get").
+				Msg("could not decode serialized data")
 		}
 	}
 
@@ -149,7 +154,10 @@ func (c *Cookie) Get(ctx *chain.Context, rawCookie string) (sid string, data map
 		}
 		var decoded any
 		if decoded, err = c.Serializer.Decode(serialized, &map[string]any{}); err != nil {
-			println(err)
+			logger.Debug().Err(err).
+				Str("store", c.Name()).
+				Str("method", "Cookie.Get").
+				Msg("could not decode serialized data")
 		}
 		data = *decoded.(*map[string]any)
 		break

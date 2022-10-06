@@ -3,7 +3,7 @@ package socket
 import (
 	"fmt"
 	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/lib"
+	"github.com/syntax-framework/chain/pkg"
 	"github.com/syntax-framework/chain/pubsub"
 	"sync"
 )
@@ -53,10 +53,10 @@ func NewChannel(topicPattern string, factory func(channel *Channel)) *Channel {
 // soft-realtime functionality.
 type Channel struct {
 	TopicPattern  string // The string pattern, for example `"room:*"`, `"users:*"`, or `"system"`
-	joinHandlers  *lib.WildcardStore[JoinHandler]
-	inHandlers    *lib.WildcardStore[InHandler]
-	outHandlers   *lib.WildcardStore[OutHandler]
-	leaveHandlers *lib.WildcardStore[LeaveHandler]
+	joinHandlers  *pkg.WildcardStore[JoinHandler]
+	inHandlers    *pkg.WildcardStore[InHandler]
+	outHandlers   *pkg.WildcardStore[OutHandler]
+	leaveHandlers *pkg.WildcardStore[LeaveHandler]
 	serializer    chain.Serializer
 	sockets       map[string]map[*Socket]bool
 	socketsMutex  sync.RWMutex
@@ -78,10 +78,12 @@ type Channel struct {
 //	     })
 func (c *Channel) Join(topic string, handler JoinHandler) {
 	if c.joinHandlers == nil {
-		c.joinHandlers = &lib.WildcardStore[JoinHandler]{}
+		c.joinHandlers = &pkg.WildcardStore[JoinHandler]{}
 	}
 	if err := c.joinHandlers.Insert(topic, handler); err != nil {
-		panic(any(fmt.Sprintf("invalid join handler for topic %s. Cause: %s", topic, err.Error())))
+		logger.Panic().Err(err).
+			Str("topic", topic).
+			Msg("invalid join handler for topic")
 	}
 	return
 }
@@ -97,10 +99,12 @@ func (c *Channel) Join(topic string, handler JoinHandler) {
 //	    })
 func (c *Channel) HandleIn(event string, handler InHandler) {
 	if c.inHandlers == nil {
-		c.inHandlers = &lib.WildcardStore[InHandler]{}
+		c.inHandlers = &pkg.WildcardStore[InHandler]{}
 	}
 	if err := c.inHandlers.Insert(event, handler); err != nil {
-		panic(any(fmt.Sprintf("invalid in handler for event %s. Cause: %s", event, err.Error())))
+		logger.Panic().Err(err).
+			Str("event", event).
+			Msg("invalid InHandler for event")
 	}
 }
 
@@ -124,20 +128,24 @@ func (c *Channel) HandleIn(event string, handler InHandler) {
 //		})
 func (c *Channel) HandleOut(event string, handler OutHandler) {
 	if c.outHandlers == nil {
-		c.outHandlers = &lib.WildcardStore[OutHandler]{}
+		c.outHandlers = &pkg.WildcardStore[OutHandler]{}
 	}
 	if err := c.outHandlers.Insert(event, handler); err != nil {
-		panic(any(fmt.Sprintf("invalid out handler for event %s. Cause: %s", event, err.Error())))
+		logger.Panic().Err(err).
+			Str("event", event).
+			Msg("invalid OutHandler for event")
 	}
 }
 
 // Leave Invoked when the socket is about to leave a Channel. See LeaveHandler
 func (c *Channel) Leave(topic string, handler LeaveHandler) {
 	if c.leaveHandlers == nil {
-		c.leaveHandlers = &lib.WildcardStore[LeaveHandler]{}
+		c.leaveHandlers = &pkg.WildcardStore[LeaveHandler]{}
 	}
 	if err := c.leaveHandlers.Insert(topic, handler); err != nil {
-		panic(any(fmt.Sprintf("invalid leave handler for topic %s. Cause: %s", topic, err.Error())))
+		logger.Panic().Err(err).
+			Str("topic", topic).
+			Msg("invalid LeaveHandler for topic")
 	}
 }
 
@@ -165,14 +173,19 @@ func (c *Channel) LocalBroadcast(topic string, event string, payload any) (err e
 func (c *Channel) Dispatch(topic string, msg any) {
 	var message *Message
 	var valid bool
-	var bytes []byte
+	var payload []byte
 	isByteArray := false
 
-	if bytes, valid = msg.([]byte); valid {
+	if payload, valid = msg.([]byte); valid {
 		isByteArray = true
 		message = newMessageAny()
-		if _, err := c.serializer.Decode(bytes, message); err != nil {
-			// @todo: Log
+		if _, err := c.serializer.Decode(payload, message); err != nil {
+			logger.Debug().Err(err).
+				Bytes("payload", payload).
+				Str("topic", topic).
+				Str("method", "Channel.Dispatch").
+				Msg("could not decode serialized data")
+
 			deleteMessage(message)
 			return
 		}
@@ -211,13 +224,13 @@ func (c *Channel) Dispatch(topic string, msg any) {
 
 	if !isByteArray {
 		var err error
-		if bytes, err = c.serializer.Encode(message); err != nil {
+		if payload, err = c.serializer.Encode(message); err != nil {
 			return
 		}
 	}
 
 	for _, socket := range sockets {
-		socket.Send(bytes)
+		socket.Send(payload)
 	}
 }
 

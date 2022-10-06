@@ -52,7 +52,10 @@ func (r *Registry) addHandle(path string, handle Handle) {
 	// avoid conflicts
 	for _, route := range r.routes {
 		if details.conflictsWith(route.Path) {
-			panic(any("wildcard routeT '" + details.path + "' conflicts with existing wildcard routeT in path '" + route.Path.path + "'"))
+			logger.Panic().
+				Str("new", details.path).
+				Str("existing", route.Path.path).
+				Msg("wildcard conflicts")
 		}
 	}
 

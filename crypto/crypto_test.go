@@ -91,7 +91,6 @@ func Test_MessageEncryptor(t *testing.T) {
 	message := []byte("José")
 
 	encrypted, err := encryptor.Encrypt(message, secret, signSecret)
-	println(encrypted)
 	if err != nil {
 		t.Errorf("MessageEncryptor.Encrypt() failed:\n   error: %v", err)
 	}

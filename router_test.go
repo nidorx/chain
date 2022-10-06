@@ -253,7 +253,7 @@ func Test_Router_OPTIONS(t *testing.T) {
 	router.ServeHTTP(w, r)
 	if !(w.Code == http.StatusOK) {
 		t.Errorf("OPTIONS handling failed: Code=%d, Header=%v", w.Code, w.Header())
-	} else if allow := w.Header().Get("Allow"); allow != "GET, OPTIONS, POST" {
+	} else if allow := w.Header().Get("Allow"); allow != "OPTIONS, POST" {
 		t.Error("unexpected Allow header value: " + allow)
 	}
 
@@ -1077,7 +1077,7 @@ func Test_Router_Catch_Max_Params(t *testing.T) {
 }
 
 func Test_Router_Double_Wildcard(t *testing.T) {
-	const panicMsg = "only one wildcard per path segment is allowed in"
+	const panicMsg = "only one wildcard per path segment is allowed"
 
 	routes := []struct {
 		path string
@@ -1094,7 +1094,7 @@ func Test_Router_Double_Wildcard(t *testing.T) {
 			})
 
 			rs := fmt.Sprintf("%v", recv)
-			if !strings.HasPrefix(rs, panicMsg) {
+			if !strings.Contains(rs, panicMsg) {
 				t.Fatalf(`"Expected panic "%s" for Route '%s', got "%v"`, panicMsg, tt, recv)
 			}
 		})

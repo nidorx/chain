@@ -1,13 +1,14 @@
 package socket
 
 import (
-	"fmt"
+	"github.com/rs/zerolog/log"
 	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/lib"
+	"github.com/syntax-framework/chain/pkg"
 	"sync"
 )
 
 var (
+	logger            = log.With().Str("package", "chain.socket").Logger()
 	defaultSerializer = &MessageSerializer{}
 	socketPool        = &sync.Pool{
 		New: func() any {
@@ -33,12 +34,14 @@ type Handler struct {
 	Serializer    chain.Serializer // Serializer definido para o Transport
 	OnConfig      ConfigHandler    // Called by Handler.Configure
 	OnConnect     ConnectHandler   // Called when client try to connect on a Transport
-	channels      *lib.WildcardStore[*Channel]
+	channels      *pkg.WildcardStore[*Channel]
 	sessions      map[string]*Session
 	sessionsMutex sync.RWMutex
 }
 
 func (h *Handler) Configure(router *chain.Router, endpoint string) {
+
+	clientJsAddHandler(router)
 
 	if h.Options == nil {
 		h.Options = map[string]any{}
@@ -46,25 +49,29 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 
 	if h.OnConfig != nil {
 		if err := h.OnConfig(h, router, endpoint); err != nil {
-			panic(any(fmt.Sprintf("socket handler config error. Cause: %s", err.Error())))
+			logger.Panic().Err(err).
+				Msg("socket handler config error")
 		}
 	}
 
 	h.sessions = map[string]*Session{}
 
 	if len(h.Channels) == 0 {
-		panic(any("It is necessary to inform the channels of this socket"))
+		logger.Panic().
+			Msg("is necessary to inform the channels of this socket")
 	}
 
 	if h.Serializer == nil {
 		h.Serializer = defaultSerializer
 	}
 
-	h.channels = &lib.WildcardStore[*Channel]{}
+	h.channels = &pkg.WildcardStore[*Channel]{}
 
 	for _, channel := range h.Channels {
 		if err := h.channels.Insert(channel.TopicPattern, channel); err != nil {
-			panic(any(fmt.Sprintf("invalid channel with topic %s. Cause: %s", channel.TopicPattern, err.Error())))
+			logger.Panic().Err(err).
+				Str("TopicPattern", channel.TopicPattern).
+				Msg("invalid channel for topic")
 		}
 		channel.serializer = h.Serializer
 	}
@@ -130,7 +137,11 @@ func (h *Handler) Dispatch(payload []byte, session *Session) {
 
 		message := newMessageAny()
 		if _, err := h.Serializer.Decode(payload, message); err != nil {
-			// @todo: Log
+			logger.Debug().Err(err).
+				Bytes("payload", payload).
+				Str("method", "Handler.Dispatch").
+				Msg("could not decode serialized data")
+
 			deleteMessage(message)
 			return
 		}
@@ -149,20 +160,28 @@ func (h *Handler) Dispatch(payload []byte, session *Session) {
 }
 
 // handleJoin Joins the channel in socket with authentication payload.
-func (h *Handler) handleJoin(message *Message, info *Session) {
+func (h *Handler) handleJoin(message *Message, session *Session) {
 	topic := message.Topic
 	channel := h.getChannel(topic)
 	if channel == nil {
-		println(fmt.Sprintf("Ignoring unmatched topic '%s'. SocketId: %s", topic, info.socketId))
-		h.pushIgnore(message, info, ErrUnmatchedTopic)
+		logger.Info().
+			Str("topic", topic).
+			Str("socket_id", session.SocketId()).
+			Str("method", "Handler.handleJoin").
+			Msg("ignoring unmatched topic")
+
+		h.pushIgnore(message, session, ErrUnmatchedTopic)
 		return
 	}
-	socket := info.GetSocket(topic)
+	socket := session.GetSocket(topic)
 	if socket != nil {
-		println(fmt.Sprintf("Duplicate channel join for topic '%s'. SocketId: %s. Closing existing channel for new join.", topic, info.socketId))
+		logger.Info().
+			Str("topic", topic).
+			Str("socket_id", session.SocketId()).
+			Msg("duplicate channel join. closing existing channel for new join")
 
 		// remove from transport
-		info.deleteSocket(topic)
+		session.deleteSocket(topic)
 
 		if socket.status != StatusLeaving {
 			if socket.channel != nil {
@@ -173,7 +192,7 @@ func (h *Handler) handleJoin(message *Message, info *Session) {
 				reply := newMessage(MessageTypePush, topic, "stx_close", nil)
 				reply.Ref = socket.ref
 				reply.JoinRef = socket.joinRef
-				h.push(reply, info)
+				h.push(reply, session)
 				deleteMessage(reply)
 			}
 
@@ -181,27 +200,27 @@ func (h *Handler) handleJoin(message *Message, info *Session) {
 		}
 	}
 
-	socket = newSocket(message.Ref, message.JoinRef, topic, channel, info, h)
+	socket = newSocket(message.Ref, message.JoinRef, topic, channel, session, h)
 
-	socket.Params = info.Params
+	socket.Params = session.Params
 
 	payload, err := channel.handleJoin(topic, message.Payload, socket)
 	if err != nil {
 		deleteSocket(socket)
-		h.pushIgnore(message, info, err)
+		h.pushIgnore(message, session, err)
 		return
 	}
 
 	socket.status = StatusJoined
 
-	info.setSocket(topic, socket)
+	session.setSocket(topic, socket)
 
 	defer deleteMessage(message)
 	message.Kind = MessageTypeReply
 	message.Status = ReplyStatusCodeOk
 	message.Payload = payload
 
-	h.push(message, info)
+	h.push(message, session)
 }
 
 func (h *Handler) handleLeave(message *Message, info *Session) {
@@ -227,12 +246,17 @@ func (h *Handler) handleLeave(message *Message, info *Session) {
 	h.push(message, info)
 }
 
-func (h *Handler) handleMessage(message *Message, info *Session) {
+func (h *Handler) handleMessage(message *Message, session *Session) {
 	topic := message.Topic
-	socket := info.GetSocket(topic)
+	socket := session.GetSocket(topic)
 	if socket == nil {
-		println(fmt.Sprintf("Ignoring unmatched topic '%s' socket. SocketId: %s", topic, info.socketId))
-		h.pushIgnore(message, info, ErrUnmatchedTopic)
+		logger.Info().
+			Str("topic", topic).
+			Str("socket_id", session.SocketId()).
+			Str("method", "Handler.handleMessage").
+			Msg("ignoring unmatched topic")
+
+		h.pushIgnore(message, session, ErrUnmatchedTopic)
 		return
 	}
 
@@ -244,12 +268,12 @@ func (h *Handler) handleMessage(message *Message, info *Session) {
 		message.Kind = MessageTypeReply
 		message.Status = ReplyStatusCodeError
 		message.Payload = payload
-		h.push(message, info)
+		h.push(message, session)
 	} else if payload != nil {
 		message.Kind = MessageTypeReply
 		message.Status = ReplyStatusCodeOk
 		message.Payload = payload
-		h.push(message, info)
+		h.push(message, session)
 	}
 }
 
@@ -282,7 +306,16 @@ func (h *Handler) push(reply *Message, info *Session) {
 	var bytes []byte
 	var err error
 	if bytes, err = h.Serializer.Encode(reply); err != nil {
-		// @todo: log
+		logger.Debug().Err(err).
+			Int("msg.Kind", int(reply.Kind)).
+			Int("msg.JoinRef", reply.JoinRef).
+			Int("msg.Ref", reply.Ref).
+			Int("msg.Status", reply.Status).
+			Str("msg.Topic", reply.Topic).
+			Str("msg.Event", reply.Event).
+			Interface("msg.Payload", reply.Payload).
+			Str("method", "Handler.push").
+			Msg("could not encode message")
 		return
 	}
 	info.Push(bytes)
