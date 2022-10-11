@@ -5,6 +5,7 @@ package chain
 
 import (
 	"context"
+	"github.com/rs/zerolog/log"
 	"github.com/syntax-framework/chain/pkg"
 	"net/http"
 	"reflect"
@@ -18,15 +19,7 @@ type Router struct {
 
 	contextPool sync.Pool
 
-	Crypto chainCrypto
-
-	// A secret key used to verify and encrypt cookies.
-	//
-	// The field must be set manually whenever one of those features are used.
-	//
-	// This data must be kept in the connection and never used directly, always use router.Crypto.keyGenerator.Generate()
-	// to derive keys from it
-	SecretKeyBase string
+	Crypto cryptoShortcuts
 
 	// Cached value of global (*) getAllowedHeader methods
 	globalAllowed string
@@ -127,18 +120,18 @@ func (r *Router) Configure(route string, configurator RouteConfigurator) {
 // Handle registers a new Route for the given method and path.
 func (r *Router) Handle(method string, route string, handle any) {
 	if method == "" {
-		logger.Panic().
-			Msg("method must not be empty")
+		log.Panic().
+			Msg(_l("method must not be empty"))
 	}
 	if len(route) < 1 || route[0] != '/' {
-		logger.Panic().
+		log.Panic().
 			Str("route", route).
-			Msg("path must begin with '/'")
+			Msg(_l("path must begin with '/'"))
 	}
 	if handle == nil {
-		logger.Panic().
+		log.Panic().
 			Str("route", route).
-			Msg("handle must not be nil")
+			Msg(_l("handle must not be nil"))
 	}
 
 	if r.registries == nil {
@@ -191,9 +184,9 @@ func (r *Router) Handle(method string, route string, handle any) {
 			return handler(ctx.Writer, ctx.Request.WithContext(reqCtx))
 		})
 	} else {
-		logger.Panic().
+		log.Panic().
 			Str("handler", reflect.TypeOf(handle).String()).
-			Msg("invalid handler")
+			Msg(_l("invalid handler"))
 	}
 }
 
@@ -290,9 +283,9 @@ func (r *Router) Use(args ...any) Group {
 				return next()
 			})
 		default:
-			logger.Panic().
+			log.Panic().
 				Str("middleware", reflect.TypeOf(arg).String()).
-				Msg("invalid middleware")
+				Msg(_l("invalid middleware"))
 		}
 	}
 
@@ -468,7 +461,6 @@ func (r *Router) GetContext(req *http.Request, w http.ResponseWriter, path strin
 	ctx.Writer = w
 	ctx.Request = req
 	ctx.paramCount = 0
-	ctx.SecretKeyBase = r.SecretKeyBase
 
 	if req != nil {
 		ctx.path = req.URL.Path

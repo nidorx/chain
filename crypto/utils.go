@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/subtle"
+	"errors"
 	"hash"
 )
 
@@ -39,4 +40,16 @@ func SecureBytesCompare(input, secret []byte) bool {
 	eq := subtle.ConstantTimeEq(int32(len(input)), int32(len(secret)))
 	eq &= subtle.ConstantTimeCompare(bs[0], bs[eq])
 	return eq == 1
+}
+
+var ErrKeySize = errors.New("key size must be 16, 24 or 32 bytes")
+
+// ValidateKey will check to see if the key is valid and returns an error if not.
+//
+// key should be either 16, 24, or 32 bytes to select AES-128, AES-192, or AES-256.
+func ValidateKey(key []byte) error {
+	if l := len(key); l != 16 && l != 24 && l != 32 {
+		return ErrKeySize
+	}
+	return nil
 }

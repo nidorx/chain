@@ -13,8 +13,6 @@ const sseSessionId = "_sse_"
 
 type TransportSSE struct {
 	sessionKey string
-	keyBase    string
-	keySalt    string
 }
 
 func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoint string) {
@@ -22,9 +20,6 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 
 	salt := chain.HashMD5(endpoint)
 	t.sessionKey = sseSessionId + salt[:8]
-	// does not save sensitive information
-	t.keyBase = chain.HashMD5(t.sessionKey)
-	t.keySalt = string(chain.Crypto.Generator.Generate([]byte(t.keyBase), []byte(salt), 0, 0, ""))
 
 	// @todo: validate the Origin header
 
@@ -33,12 +28,7 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 			Key:  t.sessionKey,
 			Path: endpoint,
 		},
-		Store: &session.Cookie{
-			CryptoOptions: session.CryptoOptions{
-				SecretKeyBase: t.keyBase,
-				SigningSalt:   t.keySalt,
-			},
-		},
+		Store: &session.Cookie{},
 	})
 
 	// Publish the message.

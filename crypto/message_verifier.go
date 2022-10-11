@@ -21,19 +21,27 @@ type MessageVerifier struct {
 
 // Sign Generates a signed message for the provided value.
 //
+// See https://www.rfc-editor.org/rfc/rfc7515#section-3.2
 // See https://www.rfc-editor.org/rfc/rfc7515#section-7
-func (v *MessageVerifier) Sign(message []byte, secret []byte, digest string) string {
+func (v *MessageVerifier) Sign(secret []byte, content []byte, digest string) string {
 	sha2Func, digest := getSha2Func(digest)
-	algoName := hmacSha2ToAlgoName[digest]
-	signingString := v.signingInput(algoName, message)
+	algo := hmacSha2ToAlgoName[digest]
+
+	// <Header>.<Payload>
+	protected := b64NoPad.EncodeToString(algo)
+	payload := b64NoPad.EncodeToString(content)
+	signingString := protected + "." + payload
+
 	hash := hmac.New(sha2Func, secret)
 	hash.Write([]byte(signingString))
 	signature := hash.Sum(nil)
-	return v.encodeToken(signingString, signature)
+
+	// <Header>.<Payload>.<Signature>
+	return signingString + "." + b64NoPad.EncodeToString(signature)
 }
 
 // Verify Decodes and verifies the encoded binary was not tampered with.
-func (v *MessageVerifier) Verify(signed []byte, secret []byte) (decoded []byte, err error) {
+func (v *MessageVerifier) Verify(secret []byte, signed []byte) (decoded []byte, err error) {
 	var (
 		algo          []byte
 		payload       []byte
@@ -54,15 +62,6 @@ func (v *MessageVerifier) Verify(signed []byte, secret []byte) (decoded []byte, 
 		err = ErrInvalidSignature
 	}
 	return
-}
-
-func (v *MessageVerifier) signingInput(protected []byte, payload []byte) string {
-	return b64NoPad.EncodeToString(protected) + "." + b64NoPad.EncodeToString(payload)
-}
-
-func (v *MessageVerifier) encodeToken(plainText string, signature []byte) string {
-	// base64 without padding
-	return plainText + "." + b64NoPad.EncodeToString(signature)
 }
 
 // decodeToken base64.Decode(token.split(".", 3))

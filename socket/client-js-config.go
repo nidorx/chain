@@ -2,6 +2,7 @@ package socket
 
 import (
 	"embed"
+	"github.com/rs/zerolog/log"
 	"github.com/syntax-framework/chain"
 )
 
@@ -15,8 +16,9 @@ var (
 func init() {
 	var err error
 	if clientJsContent, err = clientJsFS.ReadFile("client/chain.js"); err != nil {
-		logger.Panic().Err(err).
-			Msg("cannot load client/chain.js")
+		log.Panic().Err(err).
+			Caller(0).
+			Msg(_l("cannot load client/chain.js"))
 	}
 }
 
@@ -31,7 +33,9 @@ func clientJsAddHandler(router *chain.Router) {
 		// Etag
 		// Last-Modified
 		if _, err := ctx.Write(clientJsContent); err != nil {
-			logger.Error().Err(err).Msg("it was not possible to deliver /syntax-chain.js")
+			log.Error().Err(err).
+				Caller(0).
+				Msg(_l("it was not possible to deliver /syntax-chain.js"))
 		}
 	})
 }

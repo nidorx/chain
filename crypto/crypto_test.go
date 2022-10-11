@@ -51,8 +51,8 @@ func Test_MessageVerifier(t *testing.T) {
 	digests := []string{"sha512", "sha384", "sha256", "invalid"}
 	for _, digest := range digests {
 		t.Run(digest, func(t *testing.T) {
-			signed := verifier.Sign(message, secret, digest)
-			verified, err := verifier.Verify([]byte(signed), secret)
+			signed := verifier.Sign(secret, message, digest)
+			verified, err := verifier.Verify(secret, []byte(signed))
 			if err != nil {
 				t.Errorf("MessageVerifier failed:\n   error: %v", err)
 			}
@@ -86,15 +86,15 @@ func Test_MessageEncryptor(t *testing.T) {
 	signedCookieSalt := []byte("signed encrypted cookie")
 
 	secret := generator.Generate(secretKeyBase, cookieSalt, 0, 0, "")
-	signSecret := generator.Generate(secretKeyBase, signedCookieSalt, 0, 0, "")
+	aad := generator.Generate(secretKeyBase, signedCookieSalt, 0, 0, "")
 
 	message := []byte("José")
 
-	encrypted, err := encryptor.Encrypt(message, secret, signSecret)
+	encrypted, err := encryptor.Encrypt(secret, message, aad)
 	if err != nil {
 		t.Errorf("MessageEncryptor.Encrypt() failed:\n   error: %v", err)
 	}
-	decrypted, err := encryptor.Decrypt([]byte(encrypted), secret, signSecret)
+	decrypted, err := encryptor.Decrypt(secret, []byte(encrypted), aad)
 	if err != nil {
 		t.Errorf("MessageEncryptor.Decrypt() failed:\n   error: %v", err)
 	}

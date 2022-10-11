@@ -7,8 +7,11 @@ import (
 	"sync"
 )
 
+func _l(msg string) string {
+	return "[chain.socket] " + msg
+}
+
 var (
-	logger            = log.With().Str("package", "chain.socket").Logger()
 	defaultSerializer = &MessageSerializer{}
 	socketPool        = &sync.Pool{
 		New: func() any {
@@ -49,16 +52,18 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 
 	if h.OnConfig != nil {
 		if err := h.OnConfig(h, router, endpoint); err != nil {
-			logger.Panic().Err(err).
-				Msg("socket handler config error")
+			log.Panic().Err(err).
+				Caller(0).
+				Msg(_l("socket handler config error"))
 		}
 	}
 
 	h.sessions = map[string]*Session{}
 
 	if len(h.Channels) == 0 {
-		logger.Panic().
-			Msg("is necessary to inform the channels of this socket")
+		log.Panic().
+			Caller(0).
+			Msg(_l("is necessary to inform the channels of this socket"))
 	}
 
 	if h.Serializer == nil {
@@ -69,9 +74,10 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 
 	for _, channel := range h.Channels {
 		if err := h.channels.Insert(channel.TopicPattern, channel); err != nil {
-			logger.Panic().Err(err).
+			log.Panic().Err(err).
+				Caller(0).
 				Str("TopicPattern", channel.TopicPattern).
-				Msg("invalid channel for topic")
+				Msg(_l("invalid channel for topic"))
 		}
 		channel.serializer = h.Serializer
 	}
@@ -137,10 +143,10 @@ func (h *Handler) Dispatch(payload []byte, session *Session) {
 
 		message := newMessageAny()
 		if _, err := h.Serializer.Decode(payload, message); err != nil {
-			logger.Debug().Err(err).
+			log.Debug().Err(err).
+				Caller(0).
 				Bytes("payload", payload).
-				Str("method", "Handler.Dispatch").
-				Msg("could not decode serialized data")
+				Msg(_l("could not decode serialized data"))
 
 			deleteMessage(message)
 			return
@@ -164,21 +170,21 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 	topic := message.Topic
 	channel := h.getChannel(topic)
 	if channel == nil {
-		logger.Info().
+		log.Info().
+			Caller(0).
 			Str("topic", topic).
 			Str("socket_id", session.SocketId()).
-			Str("method", "Handler.handleJoin").
-			Msg("ignoring unmatched topic")
+			Msg(_l("ignoring unmatched topic"))
 
 		h.pushIgnore(message, session, ErrUnmatchedTopic)
 		return
 	}
 	socket := session.GetSocket(topic)
 	if socket != nil {
-		logger.Info().
+		log.Info().
 			Str("topic", topic).
 			Str("socket_id", session.SocketId()).
-			Msg("duplicate channel join. closing existing channel for new join")
+			Msg(_l("duplicate channel join. closing existing channel for new join"))
 
 		// remove from transport
 		session.deleteSocket(topic)
@@ -250,11 +256,10 @@ func (h *Handler) handleMessage(message *Message, session *Session) {
 	topic := message.Topic
 	socket := session.GetSocket(topic)
 	if socket == nil {
-		logger.Info().
-			Str("topic", topic).
+		log.Info().
+			Str("topics", topic).
 			Str("socket_id", session.SocketId()).
-			Str("method", "Handler.handleMessage").
-			Msg("ignoring unmatched topic")
+			Msg(_l("ignoring unmatched topic"))
 
 		h.pushIgnore(message, session, ErrUnmatchedTopic)
 		return
@@ -306,7 +311,8 @@ func (h *Handler) push(reply *Message, info *Session) {
 	var bytes []byte
 	var err error
 	if bytes, err = h.Serializer.Encode(reply); err != nil {
-		logger.Debug().Err(err).
+		log.Debug().Err(err).
+			Caller(0).
 			Int("msg.Kind", int(reply.Kind)).
 			Int("msg.JoinRef", reply.JoinRef).
 			Int("msg.Ref", reply.Ref).
@@ -314,8 +320,7 @@ func (h *Handler) push(reply *Message, info *Session) {
 			Str("msg.Topic", reply.Topic).
 			Str("msg.Event", reply.Event).
 			Interface("msg.Payload", reply.Payload).
-			Str("method", "Handler.push").
-			Msg("could not encode message")
+			Msg(_l("could not encode message"))
 		return
 	}
 	info.Push(bytes)

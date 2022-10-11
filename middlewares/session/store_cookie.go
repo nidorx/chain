@@ -15,9 +15,6 @@
 //	router.Use(session.Manager{
 //		Store: session.Cookie{
 //	    	Key: 			"_my_app_session",
-//	        EncryptionSalt: "cookie store encryption salt",
-//	        SigningSalt: 	"cookie store signing salt",
-//	        KeyLength: 		64,
 //	        Log: 			"debug"
 //		}
 //	})
@@ -25,59 +22,35 @@
 package session
 
 import (
-	"errors"
+	"github.com/rs/zerolog/log"
 	"github.com/syntax-framework/chain"
+	"github.com/syntax-framework/chain/crypto"
 	"strings"
 )
 
-var ErrSecretKeyBaseEmpty = errors.New("cookie store expects SecretKeyBase or router.SecretKeyBase to be set")
-var ErrSecretKeyBaseLen = errors.New("cookie store expects SecretKeyBase to be at least 64 bytes")
-var defaultSerializer = &chain.JsonSerializer{}
-
-type CryptoOptions struct {
-	SecretKeyBase  string // the secret key base to built the cookie signing/encryption on top of.
-	EncryptionSalt string // a salt used with `SecretKeyBase` to generate a key for encrypting/decrypting a cookie.
-	SigningSalt    string // a salt used with `SecretKeyBase` to generate a key for signing/verifying a cookie.
-	Iterations     int    // option passed to `chain.keyGenerator` when generating the encryption and signing keys. Defaults to 1000;
-	Length         int    // option passed to `chain.keyGenerator` when generating the encryption and signing keys. Defaults to 32;
-	Digest         string // option passed to `chain.keyGenerator` when generating the encryption and signing keys. Defaults to `sha256`;
-}
+var (
+	defaultSerializer     = &chain.JsonSerializer{}
+	defaultSigningKeyring = chain.NewKeyring("chain.middleware.session.keyring.salt", 1000, 32, "sha256")
+	defaultEncryptionAAD  = []byte("chain.middleware.session.cookie.aad")
+)
 
 // Cookie Stores the session in a cookie.
 // https://edgeapi.rubyonrails.org/classes/ActionDispatch/Session/CookieStore.html
 // https://funcptr.net/2013/08/25/user-sessions,-what-data-should-be-stored-where-/
 type Cookie struct {
-	CryptoOptions
-	Serializer      chain.Serializer // cookie serializer module that defines `Encode(any)` and `Decode(any)`. Defaults to `json`.
-	Log             string           // Log level to use when the cookie cannot be decoded. Defaults to `debug`, can be set to false to disable it.
-	RotatingOptions []CryptoOptions  // additional list of options to use when decrypting and verifying the cookie. These options
-	//  are used only when the cookie could not be decoded using primary options and are fetched on init so they cannot be
-	//  changed in runtime. Defaults to `[]`.
+	Log               string           // Log level to use when the cookie cannot be decoded. Defaults to `debug`, can be set to false to disable it.
+	Serializer        chain.Serializer // cookie serializer module that defines `Encode(any)` and `Decode(any)`. Defaults to `json`.
+	SigningKeyring    *crypto.Keyring  // a crypto.Keyring used with for signing/verifying a cookie.
+	EncryptionKeyring *crypto.Keyring  // a crypto.Keyring used for encrypting/decrypting a cookie.
+	EncryptionAAD     []byte           // Additional authenticated data (AAD)
 }
 
 func (c *Cookie) Name() string { return "Cookie" }
 
 func (c *Cookie) Init(config Config, router *chain.Router) (err error) {
 
-	c.SecretKeyBase = strings.TrimSpace(c.SecretKeyBase)
-	if c.SecretKeyBase == "" {
-		// get from chain.SecretKeyBase
-		c.SecretKeyBase = strings.TrimSpace(router.SecretKeyBase)
-	}
-	if err = validateSecretKeyBase(c.SecretKeyBase); err != nil {
-		return
-	}
-
-	if c.Iterations == 0 {
-		c.Iterations = 1000
-	}
-
-	if c.Length == 0 {
-		c.Length = 32
-	}
-
-	if strings.TrimSpace(c.Digest) == "" {
-		c.Digest = "sha256"
+	if c.SigningKeyring == nil {
+		c.SigningKeyring = defaultSigningKeyring
 	}
 
 	if strings.TrimSpace(c.Log) == "" {
@@ -86,28 +59,6 @@ func (c *Cookie) Init(config Config, router *chain.Router) (err error) {
 
 	if c.Serializer == nil {
 		c.Serializer = defaultSerializer
-	}
-
-	// pre derive
-	if strings.TrimSpace(c.SigningSalt) == "" {
-		logger.Panic().
-			Str("store", c.Name()).
-			Msg("cookie store expects SigningSalt")
-	}
-	var signingSalt []byte
-	if signingSalt, err = c.derive(c.SecretKeyBase, c.SigningSalt, &c.CryptoOptions); err != nil {
-		return
-	}
-	c.SigningSalt = string(signingSalt)
-
-	c.EncryptionSalt = strings.TrimSpace(c.EncryptionSalt)
-	if c.EncryptionSalt != "" {
-		// pre derive
-		var encryptionSalt []byte
-		if encryptionSalt, err = c.derive(c.SecretKeyBase, c.EncryptionSalt, &c.CryptoOptions); err != nil {
-			return
-		}
-		c.EncryptionSalt = string(encryptionSalt)
 	}
 
 	return
@@ -120,48 +71,28 @@ func (c *Cookie) Get(ctx *chain.Context, rawCookie string) (sid string, data map
 		binary     = []byte(rawCookie)
 	)
 
-	if serialized, err = c.readRawCookie(binary, &c.CryptoOptions); err == nil {
+	if c.EncryptionKeyring == nil {
+		serialized, err = c.SigningKeyring.MessageVerify(binary)
+	} else {
+		aad := defaultEncryptionAAD
+		if c.EncryptionAAD != nil {
+			aad = c.EncryptionAAD
+		}
+		serialized, err = c.EncryptionKeyring.MessageDecrypt(binary, aad)
+	}
+
+	if err == nil {
 		var decoded any
 		if decoded, err = c.Serializer.Decode(serialized, &map[string]any{}); err == nil {
 			data = *decoded.(*map[string]any)
 			return
-		} else {
-			logger.Debug().Err(err).
-				Str("store", c.Name()).
-				Str("method", "Cookie.Get").
-				Msg("could not decode serialized data")
 		}
 	}
 
-	options := []CryptoOptions{
-		{
-			SecretKeyBase:  ctx.SecretKeyBase,
-			EncryptionSalt: c.EncryptionSalt,
-			SigningSalt:    c.SigningSalt,
-			Iterations:     c.Iterations,
-			Length:         c.Length,
-			Digest:         c.Digest,
-		},
-	}
-
-	if len(c.RotatingOptions) > 0 {
-		options = append(options, c.RotatingOptions...)
-	}
-
-	for _, option := range options {
-		if serialized, err = c.readRawCookie(binary, &option); err != nil {
-			continue
-		}
-		var decoded any
-		if decoded, err = c.Serializer.Decode(serialized, &map[string]any{}); err != nil {
-			logger.Debug().Err(err).
-				Str("store", c.Name()).
-				Str("method", "Cookie.Get").
-				Msg("could not decode serialized data")
-		}
-		data = *decoded.(*map[string]any)
-		break
-	}
+	log.Debug().Err(err).
+		Caller(0).
+		Str("store", c.Name()).
+		Msg(_l("could not decode serialized data"))
 	return
 }
 
@@ -171,58 +102,17 @@ func (c *Cookie) Put(ctx *chain.Context, sid string, data map[string]any) (rawCo
 		return
 	}
 
-	var signingSalt []byte
-	if signingSalt, err = c.derive(c.SecretKeyBase, c.SigningSalt, &c.CryptoOptions); err != nil {
-		return
-	}
-	if c.EncryptionSalt == "" {
-		rawCookie = chain.MessageVerifier.Sign(encoded, signingSalt, c.Digest)
+	if c.EncryptionKeyring == nil {
+		rawCookie, err = c.SigningKeyring.MessageSign(encoded, "sha256")
 	} else {
-		var encryptionSalt []byte
-		if encryptionSalt, err = c.derive(c.SecretKeyBase, c.EncryptionSalt, &c.CryptoOptions); err != nil {
-			return
+		aad := defaultEncryptionAAD
+		if c.EncryptionAAD != nil {
+			aad = c.EncryptionAAD
 		}
-		rawCookie, err = chain.MessageEncryptor.Encrypt(encoded, encryptionSalt, signingSalt)
+		rawCookie, err = c.EncryptionKeyring.MessageEncrypt(encoded, aad)
 	}
 
 	return
 }
 
 func (c *Cookie) Delete(ctx *chain.Context, sid string) {}
-
-func (c *Cookie) readRawCookie(rawCookie []byte, opts *CryptoOptions) (serialized []byte, err error) {
-
-	var signingSalt []byte
-	if signingSalt, err = c.derive(opts.SecretKeyBase, opts.SigningSalt, opts); err != nil {
-		return
-	}
-
-	if opts.EncryptionSalt == "" {
-		return chain.MessageVerifier.Verify(rawCookie, signingSalt)
-	} else {
-		var encryptionSalt []byte
-		if encryptionSalt, err = c.derive(opts.SecretKeyBase, opts.EncryptionSalt, opts); err != nil {
-			return nil, err
-		}
-		return chain.MessageEncryptor.Decrypt(rawCookie, encryptionSalt, signingSalt)
-	}
-}
-
-func (c *Cookie) derive(secretKeyBase string, salt string, opts *CryptoOptions) (derived []byte, err error) {
-	if err = validateSecretKeyBase(secretKeyBase); err != nil {
-		return
-	}
-	derived = chain.KeyGenerator.Generate([]byte(secretKeyBase), []byte(salt), opts.Iterations, opts.Length, opts.Digest)
-	return
-}
-
-func validateSecretKeyBase(SecretKeyBase string) error {
-	if SecretKeyBase == "" {
-		return ErrSecretKeyBaseEmpty
-	}
-
-	if len(SecretKeyBase) < 8 {
-		return ErrSecretKeyBaseLen
-	}
-	return nil
-}

@@ -20,6 +20,10 @@ func PerformRequest(router *chain.Router, method string, url string, cookies []*
 
 func Test_Store_Cookie(t *testing.T) {
 
+	if err := chain.SetSecretKeyBase("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy"); err != nil {
+		panic(err)
+	}
+
 	signature := ""
 	router := chain.New()
 	router.Use(&Manager{
@@ -27,12 +31,7 @@ func Test_Store_Cookie(t *testing.T) {
 			Key:  "sid",
 			Path: "/",
 		},
-		Store: &Cookie{
-			CryptoOptions: CryptoOptions{
-				SecretKeyBase: "cookie store encryption salt",
-				SigningSalt:   "cookie store encryption salt",
-			},
-		},
+		Store: &Cookie{},
 	})
 
 	router.GET("/a", func(ctx *chain.Context) error {

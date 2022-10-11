@@ -2,6 +2,7 @@ package chain
 
 import (
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"strings"
 )
 
@@ -62,8 +63,8 @@ func (r *Route) Dispatch(ctx *Context) error {
 			calledNext := false
 			nextMid := func() error {
 				if calledNext {
-					logger.Warn().Int("index", index).Str("path", ctx.path).
-						Msg("calling next() multiple times for route")
+					log.Warn().Int("index", index).Str("path", ctx.path).
+						Msg(_l("calling next() multiple times for route"))
 
 					return nextErr
 				}
@@ -280,15 +281,15 @@ func ParsePathDetails(pathOrig string) *PathDetails {
 		part := path[ctx.pathSegments[i]+1 : ctx.pathSegments[i+1]]
 		if strings.IndexByte(part, parameter) == 0 {
 			if len(part) == 1 {
-				logger.Panic().
+				log.Panic().
 					Str("path", path).
-					Msg("is necessary to inform the name of the parameter")
+					Msg(_l("is necessary to inform the name of the parameter"))
 			}
 			paramName := part[1:]
 			if strings.IndexByte(paramName, wildcard) >= 0 || strings.IndexByte(paramName, parameter) >= 0 {
-				logger.Panic().
+				log.Panic().
 					Str("path", path).
-					Msg("only one wildcard per path segment is allowed")
+					Msg(_l("only one wildcard per path segment is allowed"))
 			}
 			details.hasParameter = true
 			details.segments = append(details.segments, string(parameter))
@@ -296,18 +297,18 @@ func ParsePathDetails(pathOrig string) *PathDetails {
 			details.paramsIndex = append(details.paramsIndex, i)
 		} else if strings.IndexByte(part, wildcard) == 0 {
 			if details.hasWildcard {
-				logger.Panic().
+				log.Panic().
 					Str("path", path).
-					Msg("catch-all routes are only allowed at the end of the path")
+					Msg(_l("catch-all routes are only allowed at the end of the path"))
 			}
 			paramName := part[1:]
 			if paramName == "" {
 				paramName = "filepath"
 			}
 			if strings.IndexByte(paramName, wildcard) >= 0 || strings.IndexByte(paramName, parameter) >= 0 {
-				logger.Panic().
+				log.Panic().
 					Str("path", path).
-					Msg("only one wildcard per path segment is allowed")
+					Msg(_l("only one wildcard per path segment is allowed"))
 			}
 			details.hasWildcard = true
 			details.segments = append(details.segments, string(wildcard))

@@ -1,6 +1,9 @@
 package chain
 
-import "strings"
+import (
+	"github.com/rs/zerolog/log"
+	"strings"
+)
 
 // Registry is an algorithm-independent framework for recording routes. This division allows us to explore different
 // algorithms without breaking the contract.
@@ -52,10 +55,10 @@ func (r *Registry) addHandle(path string, handle Handle) {
 	// avoid conflicts
 	for _, route := range r.routes {
 		if details.conflictsWith(route.Path) {
-			logger.Panic().
+			log.Panic().
 				Str("new", details.path).
 				Str("existing", route.Path.path).
-				Msg("wildcard conflicts")
+				Msg(_l("wildcard conflicts"))
 		}
 	}
 

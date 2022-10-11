@@ -1,8 +1,22 @@
 package chain
 
-import "github.com/rs/zerolog/log"
+import (
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"os"
+	"time"
+)
 
-var logger = log.With().Str("package", "chain.router").Logger()
+func _l(msg string) string {
+	return "[chain] " + msg
+}
+
+func init() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{
+		Out:        os.Stderr,
+		TimeFormat: time.RFC3339,
+	})
+}
 
 func New() *Router {
 	router := &Router{

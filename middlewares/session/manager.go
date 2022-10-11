@@ -11,8 +11,11 @@ import (
 
 var globalManagers = map[*chain.Router]*Manager{}
 
+func _l(msg string) string {
+	return "[chain.middlewares.session] " + msg
+}
+
 var (
-	logger         = log.With().Str("package", "chain.middlewares.session").Logger()
 	sessionKey     = "syntax.chain.session."         // Session on chain.Context
 	managerKey     = "syntax.chain.session-manager." // Manager on chain.Context
 	ErrCannotFetch = errors.New("cannot fetch session, check if there is a session.Manager configured")
@@ -27,29 +30,24 @@ type Manager struct {
 func (m *Manager) Init(method string, path string, router *chain.Router) {
 
 	if m.Store == nil {
-		m.Store = &Cookie{
-			CryptoOptions:   CryptoOptions{},
-			Serializer:      nil,
-			Log:             "",
-			RotatingOptions: nil,
-		}
-		logger.Panic().Msg("store is required")
+		m.Store = &Cookie{}
+		log.Panic().Msg(_l("store is required"))
 	}
 	if strings.TrimSpace(m.Key) == "" {
-		logger.Panic().Msg("Key is required")
+		log.Panic().Msg(_l("Key is required"))
 	}
 
 	if (method == "" || method == "*") && (path == "" || path == "*" || path == "/*") {
 		if _, exist := globalManagers[router]; exist {
-			logger.Panic().Msg("there is already a global session.Manager registered for this chain.Router")
+			log.Panic().Msg(_l("there is already a global session.Manager registered for this chain.Router"))
 		}
 		globalManagers[router] = m
 	}
 
 	if err := m.Store.Init(m.Config, router); err != nil {
-		logger.Panic().
+		log.Panic().
 			Str("store", m.Store.Name()).
-			Msg("error initializing store")
+			Msg(_l("error initializing store"))
 	}
 }
 
@@ -85,10 +83,10 @@ func (m *Manager) beforeSend(ctx *chain.Context, sid string, session *Session) {
 	case write:
 		rawCookie, err := m.Store.Put(ctx, sid, session.data)
 		if err != nil {
-			logger.Error().Err(err).
+			log.Error().Err(err).
+				Caller(0).
 				Str("store", m.Store.Name()).
-				Str("method", "Manager.beforeSend.write").
-				Msg("error saving session in store")
+				Msg(_l("error saving session in store"))
 		} else {
 			m.setCookie(ctx, rawCookie)
 		}
@@ -103,10 +101,10 @@ func (m *Manager) beforeSend(ctx *chain.Context, sid string, session *Session) {
 		}
 		rawCookie, err := m.Store.Put(ctx, "", session.data)
 		if err != nil {
-			logger.Error().Err(err).
+			log.Error().Err(err).
+				Caller(0).
 				Str("store", m.Store.Name()).
-				Str("method", "Manager.beforeSend.renew").
-				Msg("error saving session in store")
+				Msg(_l("error saving session in store"))
 		} else {
 			m.setCookie(ctx, rawCookie)
 		}

@@ -22,8 +22,8 @@ func keyGenerator() {
 	cookieSalt := []byte("encrypted cookie")
 	signedCookieSalt := []byte("signed encrypted cookie")
 
-	secret := chain.KeyGenerator.Generate(secretKeyBase, cookieSalt, 1000, 32, "sha256")
-	signSecret := chain.KeyGenerator.Generate(secretKeyBase, signedCookieSalt, 1000, 32, "sha256")
+	secret := chain.Crypto().KeyGenerate(secretKeyBase, cookieSalt, 1000, 32, "sha256")
+	signSecret := chain.Crypto().KeyGenerate(secretKeyBase, signedCookieSalt, 1000, 32, "sha256")
 
 	println(base64.StdEncoding.EncodeToString(secret))
 	println(base64.StdEncoding.EncodeToString(signSecret))
@@ -33,10 +33,10 @@ func messageVerifier() {
 	message := []byte("This is content")
 	secret := []byte("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy")
 
-	signed := chain.MessageVerifier.Sign(message, secret, "sha256")
+	signed := chain.Crypto().MessageSign(secret, message, "sha256")
 	println(signed)
 
-	verified, _ := chain.MessageVerifier.Verify([]byte(signed), secret)
+	verified, _ := chain.Crypto().MessageVerify(secret, []byte(signed))
 	println(string(verified))
 }
 
@@ -44,14 +44,16 @@ func messageEncryptor() {
 	data := []byte("This is content")
 
 	secretKeyBase := []byte("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy")
+
 	cookieSalt := []byte("encrypted cookie")
 	signedCookieSalt := []byte("signed encrypted cookie")
-	secret := chain.KeyGenerator.Generate(secretKeyBase, cookieSalt, 1000, 32, "sha256")
-	signSecret := chain.KeyGenerator.Generate(secretKeyBase, signedCookieSalt, 1000, 32, "sha256")
 
-	encrypted, _ := chain.MessageEncryptor.Encrypt(data, secret, signSecret)
+	encryptionKey := chain.Crypto().KeyGenerate(secretKeyBase, cookieSalt, 1000, 32, "sha256")
+	aad := chain.Crypto().KeyGenerate(secretKeyBase, signedCookieSalt, 1000, 32, "sha256")
+
+	encrypted, _ := chain.Crypto().MessageEncrypt(encryptionKey, data, aad)
 	println(encrypted)
 
-	decrypted, _ := chain.MessageEncryptor.Decrypt([]byte(encrypted), secret, signSecret)
+	decrypted, _ := chain.Crypto().MessageDecrypt(encryptionKey, []byte(encrypted), aad)
 	println(string(decrypted))
 }

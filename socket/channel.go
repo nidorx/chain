@@ -2,6 +2,7 @@ package socket
 
 import (
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"github.com/syntax-framework/chain"
 	"github.com/syntax-framework/chain/pkg"
 	"github.com/syntax-framework/chain/pubsub"
@@ -81,9 +82,10 @@ func (c *Channel) Join(topic string, handler JoinHandler) {
 		c.joinHandlers = &pkg.WildcardStore[JoinHandler]{}
 	}
 	if err := c.joinHandlers.Insert(topic, handler); err != nil {
-		logger.Panic().Err(err).
+		log.Panic().Err(err).
+			Caller(0).
 			Str("topic", topic).
-			Msg("invalid join handler for topic")
+			Msg(_l("invalid join handler for topic"))
 	}
 	return
 }
@@ -102,9 +104,10 @@ func (c *Channel) HandleIn(event string, handler InHandler) {
 		c.inHandlers = &pkg.WildcardStore[InHandler]{}
 	}
 	if err := c.inHandlers.Insert(event, handler); err != nil {
-		logger.Panic().Err(err).
+		log.Panic().Err(err).
+			Caller(0).
 			Str("event", event).
-			Msg("invalid InHandler for event")
+			Msg(_l("invalid InHandler for event"))
 	}
 }
 
@@ -131,9 +134,10 @@ func (c *Channel) HandleOut(event string, handler OutHandler) {
 		c.outHandlers = &pkg.WildcardStore[OutHandler]{}
 	}
 	if err := c.outHandlers.Insert(event, handler); err != nil {
-		logger.Panic().Err(err).
+		log.Panic().Err(err).
+			Caller(0).
 			Str("event", event).
-			Msg("invalid OutHandler for event")
+			Msg(_l("invalid OutHandler for event"))
 	}
 }
 
@@ -143,9 +147,10 @@ func (c *Channel) Leave(topic string, handler LeaveHandler) {
 		c.leaveHandlers = &pkg.WildcardStore[LeaveHandler]{}
 	}
 	if err := c.leaveHandlers.Insert(topic, handler); err != nil {
-		logger.Panic().Err(err).
+		log.Panic().Err(err).
+			Caller(0).
 			Str("topic", topic).
-			Msg("invalid LeaveHandler for topic")
+			Msg(_l("invalid LeaveHandler for topic"))
 	}
 }
 
@@ -170,7 +175,7 @@ func (c *Channel) LocalBroadcast(topic string, event string, payload any) (err e
 }
 
 // Dispatch Hook invoked by pubsub dispatch.
-func (c *Channel) Dispatch(topic string, msg any) {
+func (c *Channel) Dispatch(topic string, msg any, from string) {
 	var message *Message
 	var valid bool
 	var payload []byte
@@ -180,11 +185,11 @@ func (c *Channel) Dispatch(topic string, msg any) {
 		isByteArray = true
 		message = newMessageAny()
 		if _, err := c.serializer.Decode(payload, message); err != nil {
-			logger.Debug().Err(err).
+			log.Debug().Err(err).
+				Caller(0).
 				Bytes("payload", payload).
 				Str("topic", topic).
-				Str("method", "Channel.Dispatch").
-				Msg("could not decode serialized data")
+				Msg(_l("could not decode serialized data"))
 
 			deleteMessage(message)
 			return

@@ -33,17 +33,9 @@ type Context struct {
 	MatchedRoutePath  string
 	Writer            http.ResponseWriter
 	Request           *http.Request
-	Crypto            *chainCrypto
-
-	// A secret key used to verify and encrypt cookies.
-	//
-	// The field must be set manually whenever one of those features are used.
-	//
-	// This data must be kept in the connection and never used directly, always use router.Crypto.keyGenerator.Generate()
-	// to derive keys from it
-	SecretKeyBase string
-	root          *Context
-	children      []*Context
+	Crypto            *cryptoShortcuts
+	root              *Context
+	children          []*Context
 }
 
 // Set define um valor compartilhado no contexto de execução da requisição

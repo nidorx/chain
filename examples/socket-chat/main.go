@@ -18,6 +18,12 @@ var (
 )
 
 func main() {
+
+	// Used by session
+	if err := chain.SetSecretKeyBase("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy"); err != nil {
+		panic(err)
+	}
+
 	router := chain.New()
 
 	var staticFS = http.FS(staticFiles)
