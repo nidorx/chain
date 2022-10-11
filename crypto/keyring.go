@@ -51,13 +51,7 @@ func (k *Keyring) AddKey(key []byte) error {
 	if primaryKey == nil {
 		primaryKey = key
 	}
-	newKeys := [][]byte{primaryKey}
-	for _, it := range k.keys {
-		if !bytes.Equal(it, primaryKey) {
-			newKeys = append(newKeys, it)
-		}
-	}
-	k.keys = newKeys
+	k.keys = append([][]byte{key}, k.keys...)
 	return nil
 }
 

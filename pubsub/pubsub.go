@@ -98,7 +98,7 @@ func Unsubscribe(topic string, dispatcher Dispatcher) {
 }
 
 // Broadcast broadcasts message on given topic across the whole cluster.
-func Broadcast(topic string, message []byte, options ...Option) (err error) {
+func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	var config *AdapterConfig
 	if config = GetAdapter(topic); config == nil {
 		return ErrNoAdapter
