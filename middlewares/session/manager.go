@@ -83,8 +83,7 @@ func (m *Manager) beforeSend(ctx *chain.Context, sid string, session *Session) {
 	case write:
 		rawCookie, err := m.Store.Put(ctx, sid, session.data)
 		if err != nil {
-			log.Error().Err(err).
-				Caller(0).
+			log.Error().Err(err).Caller(1).
 				Str("store", m.Store.Name()).
 				Msg(_l("error saving session in store"))
 		} else {
@@ -101,8 +100,7 @@ func (m *Manager) beforeSend(ctx *chain.Context, sid string, session *Session) {
 		}
 		rawCookie, err := m.Store.Put(ctx, "", session.data)
 		if err != nil {
-			log.Error().Err(err).
-				Caller(0).
+			log.Error().Err(err).Caller(1).
 				Str("store", m.Store.Name()).
 				Msg(_l("error saving session in store"))
 		} else {

@@ -89,8 +89,7 @@ func (c *Cookie) Get(ctx *chain.Context, rawCookie string) (sid string, data map
 		}
 	}
 
-	log.Debug().Err(err).
-		Caller(0).
+	log.Debug().Err(err).Caller(1).
 		Str("store", c.Name()).
 		Msg(_l("could not decode serialized data"))
 	return

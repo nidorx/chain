@@ -50,10 +50,9 @@ func messageEncryptor() {
 	secretKeyBase := []byte("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy")
 
 	cookieSalt := []byte("encrypted cookie")
-	signedCookieSalt := []byte("signed encrypted cookie")
 
 	encryptionKey := chain.Crypto().KeyGenerate(secretKeyBase, cookieSalt, 1000, 32, "sha256")
-	aad := chain.Crypto().KeyGenerate(secretKeyBase, signedCookieSalt, 1000, 32, "sha256")
+	aad := []byte("purpose: database key")
 
 	encrypted, _ := chain.Crypto().MessageEncrypt(encryptionKey, data, aad)
 	println(encrypted)
@@ -63,23 +62,20 @@ func messageEncryptor() {
 }
 
 func keyring() {
-	secretKeyBaseA := "ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy"
-	secretKeyBaseB := "fe6d1fed11fa60277fb6a2f73efb8be2"
-
 	aad := []byte("purpose: database key")
 
 	var myKeyring = chain.NewKeyring("SALT", 1000, 32, "sha256")
 
 	// moment 1, set global key
-	if err := chain.SetSecretKeyBase(secretKeyBaseA); err != nil {
+	if err := chain.SetSecretKeyBase("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy"); err != nil {
 		panic(err)
 	}
 
 	encryptedA, _ := myKeyring.Encrypt([]byte("Jack"), aad)
 	println(base64.StdEncoding.EncodeToString(encryptedA))
 
-	// moment 1, update global key
-	if err := chain.SetSecretKeyBase(secretKeyBaseB); err != nil {
+	// moment 2, update global key
+	if err := chain.SetSecretKeyBase("fe6d1fed11fa60277fb6a2f73efb8be2"); err != nil {
 		panic(err)
 	}
 

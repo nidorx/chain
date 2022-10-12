@@ -20,11 +20,7 @@ elegant and safe way.
 - Optimized HTTP Router middleware
 - Realtime Publisher/Subscriber service.
 - Socket & Channels: A socket implementation that multiplexes messages over channels.
-- Crypto-related functionality
-    - **KeyGenerator**: It can be used to derive a number of keys for various purposes from a given secret. This lets
-      applications have a single secure secret, but avoid reusing that key in multiple incompatible contexts.
-    - **MessageVerifier**: makes it easy to generate and verify messages which are signed to prevent tampering.
-    - **MessageEncryptor** is a simple way to encrypt values which get stored somewhere you don't trust.
+- Crypto-related functionalities
 
 ## Installation
 
@@ -121,7 +117,7 @@ import (
 type MyDispatcher struct {
 }
 
-func (d *MyDispatcher) Dispatch(topic string, message any) {
+func (d *MyDispatcher) Dispatch(topic string, message any, from string) {
 	println(fmt.Sprintf("New Message. Topic: %s, Content: %s", topic, message))
 }
 
@@ -143,14 +139,14 @@ func main() {
 	pubsub.Broadcast("user:123", []byte("Message 2"))
 
 	// await
-	<-time.After(time.Second)
+	<-time.After(time.Millisecond * 10)
 
 	pubsub.Unsubscribe("user:123", dispatcher)
 
 	pubsub.Broadcast("user:123", []byte("Message Ignored"))
 
 	// await
-	<-time.After(time.Second)
+	<-time.After(time.Millisecond * 10)
 }
 ```
 
@@ -237,104 +233,18 @@ channel.on('other_event', (message) => chain.log('OtherEvent', message))
 
 ## Crypto
 
-### KeyGenerator
+Simplify and standardize the use and maintenance of symmetric cryptographic keys.
 
-KeyGenerator uses PBKDF2 (Password-Based Key Derivation Function 2), part of PKCS #5 v2.0 (Password-Based
-Cryptography Specification).
+Features:
 
-It can be used to derive a number of keys for various purposes from a given secret. This lets applications have a
-single secure secret, but avoid reusing that key in multiple incompatible contexts.
-
-The returned key is a binary. You may invoke functions in the `base64` module, such as
-`base64.StdEncoding.EncodeToString()`, to convert this binary into a textual representation.
-
-See http://tools.ietf.org/html/rfc2898#section-5.2
-
-The `KeyGenerator.Generate` method returns a derived key suitable for use.
-
-```go
-secretKeyBase := []byte("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy")
-
-cookieSalt := []byte("encrypted cookie")
-signedCookieSalt := []byte("signed encrypted cookie")
-
-secret := chain.KeyGenerator.Generate(secretKeyBase, cookieSalt, 1000, 32, "sha256")
-signSecret := chain.KeyGenerator.Generate(secretKeyBase, signedCookieSalt, 1000, 32, "sha256")
-
-println(base64.StdEncoding.EncodeToString(secret))
-// output: hpMv01EYLPyGVlV5cBOJR0eK6HNSHO+zHKMmZp2Ezqw=
-
-println(base64.StdEncoding.EncodeToString(signSecret))
-// output: y3/r20tnfIWkRZr4HlaC3GAM4LsvS8KnF0JuIi/G/RQ=
-```
-
-### MessageVerifier
-
-`MessageVerifier` makes it easy to generate and verify messages which are signed to prevent tampering.
-
-For example, the [cookie store](https://github.com/syntax-framework/chain/blob/main/middlewares/session/store_cookie.go)
-uses this verifier to send data to the client. The data can be read by the client, but cannot be tampered with.
-
-The message and its verification are base64url encoded and returned to you. 
-
-This is useful for cases like remember-me tokens and auto-unsubscribe links.
-
-```go
-message := []byte("This is content")
-secret := []byte("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy")
-
-signed := chain.MessageVerifier.Sign(message, secret, "sha256")
-println(signed)
-// output: SFMyNTY.VGhpcyBpcyBjb250ZW50.m-DwbnWabePV8K7-lUNhS8c6gWnwpQcAAhaQ6V2fwA8
-
-verified, _ := chain.MessageVerifier.Verify([]byte(signed), secret)
-println(string(verified))
-// output: This is content
-```
-
-#### Decoding using javascript
-
-MessageVerifier does not encrypt your data, it only signs it. In this way, the signed message can be easily read via
-javascript, making it an excellent mechanism to share data with the frontend with the guarantee that the value cannot be
-modified.
-
-```javascript
-let signed = 'SFMyNTY.VGhpcyBpcyBjb250ZW50.m-DwbnWabePV8K7-lUNhS8c6gWnwpQcAAhaQ6V2fwA8';
-let content = atob(signed.split('.')[1])
-console.log(content); // This is content
-```
-
-### MessageEncryptor
-
-`MessageEncryptor` is a simple way to encrypt values which get stored somewhere you don't trust.
-
-The encrypted key is base64url encoded and returned to you.
-
-This can be used in situations similar to the `MessageVerifier`, but where you don't want users to be able to determine
-the value of the payload.
-
-```go
-data := []byte("This is content")
-
-secretKeyBase := []byte("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy")
-
-cookieSalt := []byte("encrypted cookie")
-signedCookieSalt := []byte("signed encrypted cookie")
-
-secret := chain.KeyGenerator.Generate(secretKeyBase, cookieSalt, 1000, 32, "sha256")
-signSecret := chain.KeyGenerator.Generate(secretKeyBase, signedCookieSalt, 1000, 32, "sha256")
-
-encrypted, _ := chain.MessageEncryptor.Encrypt(data, secret, signSecret)
-println(encrypted)
-// output: QTEyOEdDTQ.6a38RGT313YpFoSkixjo_dJAyUxrDMq2SCG0RbpV27vuGkC4XCDKt8L2h68.QBekP9B7ousP7nEhpsvabIR8qZTmdiZFyQ9MZbJSvAOo2pPFlT_v0d57zw
-
-decrypted, _ := chain.MessageEncryptor.Decrypt([]byte(encrypted), secret, signSecret)
-println(string(decrypted))
-// output: This is content
-```
-
-> Note that, unlike `MessageVerifier`, the result (`encrypted`) cannot be read. Only in possession of `secret`
-> and `signSecred` is it possible to access the original content.
+- **SecretKeyBase** Solution that allows your application to have a single security key and from that it is possible to
+  generate an infinite number of derived keys used in the most diverse features of your project.
+- **Keyring** Allows you to enable key rotation, allowing encryption processes to be performed with a new key and data
+  encrypted with old keys can still be decrypted.
+- **KeyGenerator**: It can be used to derive a number of keys for various purposes from a given secret. This lets
+  applications have a single secure secret, but avoid reusing that key in multiple incompatible contexts.
+- **MessageVerifier**: makes it easy to generate and verify messages which are signed to prevent tampering.
+- **MessageEncryptor** is a simple way to encrypt values which get stored somewhere you don't trust.
 
 ### More about Crypto
 

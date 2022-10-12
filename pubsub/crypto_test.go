@@ -11,7 +11,7 @@ func Test_PubSub_Crypto(t *testing.T) {
 		panic(err)
 	}
 
-	for _, tt := range payloads {
+	for _, tt := range testPayloads {
 		t.Run(tt.content, func(t *testing.T) {
 			payload := []byte(tt.content)
 			encrypted, err := encryptPayload(globalKeyring, payload)

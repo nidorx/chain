@@ -16,8 +16,8 @@ var (
 func init() {
 	var err error
 	if clientJsContent, err = clientJsFS.ReadFile("client/chain.js"); err != nil {
-		log.Panic().Err(err).
-			Caller(0).
+		log.Panic().Err(err).Caller(1).
+			Stack().
 			Msg(_l("cannot load client/chain.js"))
 	}
 }
@@ -33,8 +33,7 @@ func clientJsAddHandler(router *chain.Router) {
 		// Etag
 		// Last-Modified
 		if _, err := ctx.Write(clientJsContent); err != nil {
-			log.Error().Err(err).
-				Caller(0).
+			log.Error().Stack().Err(err).Caller(1).
 				Msg(_l("it was not possible to deliver /syntax-chain.js"))
 		}
 	})

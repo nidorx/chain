@@ -82,8 +82,7 @@ func (c *Channel) Join(topic string, handler JoinHandler) {
 		c.joinHandlers = &pkg.WildcardStore[JoinHandler]{}
 	}
 	if err := c.joinHandlers.Insert(topic, handler); err != nil {
-		log.Panic().Err(err).
-			Caller(0).
+		log.Panic().Err(err).Caller(1).
 			Str("topic", topic).
 			Msg(_l("invalid join handler for topic"))
 	}
@@ -104,8 +103,7 @@ func (c *Channel) HandleIn(event string, handler InHandler) {
 		c.inHandlers = &pkg.WildcardStore[InHandler]{}
 	}
 	if err := c.inHandlers.Insert(event, handler); err != nil {
-		log.Panic().Err(err).
-			Caller(0).
+		log.Panic().Err(err).Caller(1).
 			Str("event", event).
 			Msg(_l("invalid InHandler for event"))
 	}
@@ -134,8 +132,7 @@ func (c *Channel) HandleOut(event string, handler OutHandler) {
 		c.outHandlers = &pkg.WildcardStore[OutHandler]{}
 	}
 	if err := c.outHandlers.Insert(event, handler); err != nil {
-		log.Panic().Err(err).
-			Caller(0).
+		log.Panic().Err(err).Caller(1).
 			Str("event", event).
 			Msg(_l("invalid OutHandler for event"))
 	}
@@ -147,8 +144,7 @@ func (c *Channel) Leave(topic string, handler LeaveHandler) {
 		c.leaveHandlers = &pkg.WildcardStore[LeaveHandler]{}
 	}
 	if err := c.leaveHandlers.Insert(topic, handler); err != nil {
-		log.Panic().Err(err).
-			Caller(0).
+		log.Panic().Err(err).Caller(1).
 			Str("topic", topic).
 			Msg(_l("invalid LeaveHandler for topic"))
 	}
@@ -185,8 +181,7 @@ func (c *Channel) Dispatch(topic string, msg any, from string) {
 		isByteArray = true
 		message = newMessageAny()
 		if _, err := c.serializer.Decode(payload, message); err != nil {
-			log.Debug().Err(err).
-				Caller(0).
+			log.Debug().Err(err).Caller(1).
 				Bytes("payload", payload).
 				Str("topic", topic).
 				Msg(_l("could not decode serialized data"))

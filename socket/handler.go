@@ -52,8 +52,7 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 
 	if h.OnConfig != nil {
 		if err := h.OnConfig(h, router, endpoint); err != nil {
-			log.Panic().Err(err).
-				Caller(0).
+			log.Panic().Stack().Err(err).Caller(1).
 				Msg(_l("socket handler config error"))
 		}
 	}
@@ -61,8 +60,7 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 	h.sessions = map[string]*Session{}
 
 	if len(h.Channels) == 0 {
-		log.Panic().
-			Caller(0).
+		log.Panic().Caller(1).
 			Msg(_l("is necessary to inform the channels of this socket"))
 	}
 
@@ -74,8 +72,7 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 
 	for _, channel := range h.Channels {
 		if err := h.channels.Insert(channel.TopicPattern, channel); err != nil {
-			log.Panic().Err(err).
-				Caller(0).
+			log.Panic().Stack().Err(err).Caller(1).
 				Str("TopicPattern", channel.TopicPattern).
 				Msg(_l("invalid channel for topic"))
 		}
@@ -143,8 +140,7 @@ func (h *Handler) Dispatch(payload []byte, session *Session) {
 
 		message := newMessageAny()
 		if _, err := h.Serializer.Decode(payload, message); err != nil {
-			log.Debug().Err(err).
-				Caller(0).
+			log.Debug().Err(err).Caller(1).
 				Bytes("payload", payload).
 				Msg(_l("could not decode serialized data"))
 
@@ -170,8 +166,7 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 	topic := message.Topic
 	channel := h.getChannel(topic)
 	if channel == nil {
-		log.Info().
-			Caller(0).
+		log.Info().Caller(1).
 			Str("topic", topic).
 			Str("socket_id", session.SocketId()).
 			Msg(_l("ignoring unmatched topic"))
@@ -311,8 +306,7 @@ func (h *Handler) push(reply *Message, info *Session) {
 	var bytes []byte
 	var err error
 	if bytes, err = h.Serializer.Encode(reply); err != nil {
-		log.Debug().Err(err).
-			Caller(0).
+		log.Debug().Err(err).Caller(1).
 			Int("msg.Kind", int(reply.Kind)).
 			Int("msg.JoinRef", reply.JoinRef).
 			Int("msg.Ref", reply.Ref).

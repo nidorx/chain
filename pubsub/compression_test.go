@@ -6,7 +6,7 @@ import (
 )
 
 func Test_PubSub_Compression(t *testing.T) {
-	for _, tt := range payloads {
+	for _, tt := range testPayloads {
 		t.Run(tt.content, func(t *testing.T) {
 			payload := []byte(tt.content)
 			compressed, err := compressPayload(payload)

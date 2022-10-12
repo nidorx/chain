@@ -12,10 +12,10 @@ import (
 )
 
 var (
-	selfKSUID    = ksuid.New()
-	selfBytes    = selfKSUID.Bytes() // 20 bytes
-	selfString   = selfKSUID.String()
-	directTopic  = "stx:direct:" + selfString
+	selfId       = ksuid.New()
+	selfIdBytes  = selfId.Bytes() // 20 bytes
+	selfIdString = selfId.String()
+	directTopic  = "stx:direct:" + selfIdString
 	ErrNoAdapter = errors.New("no adapter matches topic to broadcast the message")
 )
 
@@ -59,7 +59,7 @@ var p = &pubsub{
 
 // Self get node id
 func Self() string {
-	return selfString
+	return selfIdString
 }
 
 func Subscribe(topic string, dispatcher Dispatcher) {
@@ -105,7 +105,7 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	}
 
 	if config.Adapter.Name() == "dummy" {
-		dispatchMessage(topic, message, selfString)
+		dispatchMessage(topic, message, selfIdString)
 		return
 	}
 
@@ -119,13 +119,13 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 
 	msgToSend := message
 
-	// [from: 20 bytes] [msgToSend: ...]
-	msgToSend = append(selfBytes, msgToSend...)
+	// [messageType: byte] [from: 20 bytes] [msgToSend: ...]
+	msgToSend = append(append([]byte{byte(messageTypeBroadcast)}, selfIdBytes...), msgToSend...)
 
 	// Check if we have compression enabled
 	if config.DisableCompression == false {
 		var compressed []byte
-		if compressed, err = compressPayload(message); err != nil {
+		if compressed, err = compressPayload(msgToSend); err != nil {
 			log.Warn().Err(err).Msg(_l("Failed to compress payload"))
 		} else if len(compressed) < len(msgToSend) {
 			// Only use compression if it reduced the size
@@ -149,13 +149,89 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 
 	if err = config.Adapter.Broadcast(topic, msgToSend, opts); err == nil {
 		// local dispatch
-		dispatchMessage(topic, message, selfString)
+		dispatchMessage(topic, message, selfIdString)
 	}
 	return
 }
 
 // DirectBroadcast Broadcasts ServiceMsg on given topic to a given node.
-func DirectBroadcast(to string, topic string, message []byte, options ...Option) {
+func DirectBroadcast(nodeId string, topic string, message []byte, options ...*Option) error {
+	// [messageType: byte] [from: 20 bytes] [message: ...]
+
+	nodeIdK, err := ksuid.Parse(nodeId)
+	if err != nil {
+		return err
+	}
+
+	// [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
+	buf := &bytes.Buffer{}
+	buf.Write(nodeIdK.Bytes())
+
+	topicNameLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(topicNameLen, uint32(len(topic)))
+	buf.Write(topicNameLen)
+
+	buf.WriteString(topic)
+	buf.Write(message)
+
+	return broadcastMessage(messageTypeDirectBroadcast, "stx:direct:"+nodeId, buf.Bytes(), options...)
+}
+
+// Broadcast broadcasts message on given topic across the whole cluster.
+func broadcastMessage(msgType messageType, topic string, message []byte, options ...*Option) (err error) {
+	var config *AdapterConfig
+	if config = GetAdapter(topic); config == nil {
+		return ErrNoAdapter
+	}
+
+	if config.Adapter.Name() == "dummy" {
+		dispatchMessage(topic, message, selfIdString)
+		return
+	}
+
+	opts := map[string]any{}
+	for k, v := range globalOptions {
+		opts[k] = v
+	}
+	for _, opt := range options {
+		opts[opt.key] = opt.value
+	}
+
+	// [messageType: byte] [from: 20 bytes] [message: ...]
+	// [messageType: byte] [from: 20 bytes] [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
+	buf := &bytes.Buffer{}
+	buf.WriteByte(byte(msgType))
+	buf.Write(selfIdBytes)
+	buf.Write(message)
+	msgToSend := buf.Bytes()
+
+	// Check if we have compression enabled
+	if config.DisableCompression == false {
+		var compressed []byte
+		if compressed, err = compressPayload(msgToSend); err != nil {
+			log.Warn().Err(err).Msg(_l("Failed to compress payload"))
+		} else if len(compressed) < len(msgToSend) {
+			// Only use compression if it reduced the size
+			msgToSend = compressed
+		}
+	}
+
+	// Check if we have encryption enabled
+	if config.DisableEncryption == false {
+		keyring := config.Keyring
+		if keyring == nil {
+			keyring = globalKeyring
+		}
+		var encrypted []byte
+		if encrypted, err = encryptPayload(keyring, msgToSend); err != nil {
+			log.Error().Err(err).Msg(_l("Encryption of message failed"))
+			return err
+		}
+		msgToSend = encrypted
+	}
+
+	err = config.Adapter.Broadcast(topic, msgToSend, opts)
+	return
 }
 
 // Dispatch used by adapters, process and delivery messages coming from backend (redis, kafka, *MQ), decrypting and
@@ -191,7 +267,7 @@ func Dispatch(topic string, message []byte) {
 
 			// Reset message type and buf
 			msgType = messageType(plain[0])
-			message = plain[1:]
+			message = plain
 		} else if config.DisableEncryption == false {
 			log.Error().
 				Str("topic", topic).
@@ -214,51 +290,13 @@ func Dispatch(topic string, message []byte) {
 
 			// Reset message type and buf
 			msgType = messageType(decompressed[0])
-			message = decompressed[1:]
+			message = decompressed
 		}
 
-		// Check if is a direct broadcast
-		if msgType == messageTypeDirectBroadcast {
-			if topic != directTopic {
-				log.Error().
-					Str("topic", topic).
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Invalid topic for remote direct broadcast message"))
-			}
+		// [messageType: byte] [from: 20 bytes] [message: ...]
+		// [messageType: byte] [from: 20 bytes] [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
+		message = message[1:]
 
-			// [messageType: byte] [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
-			if len(message) < 25 {
-				log.Error().
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Invalid remote direct broadcast length"))
-				return
-			}
-
-			toBytes := message[1:21]
-			message = message[21:]
-
-			if !bytes.Equal(selfBytes, toBytes) {
-				log.Error().
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Invalid remote direct broadcast destination"))
-				return
-			}
-
-			// [topicNameLen: uint] [topic: topicNameLen] [message: ...]
-			topicNameLen := int(binary.BigEndian.Uint16(message[1:4]))
-			message = message[4:]
-
-			if len(message) < topicNameLen {
-				log.Error().
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Invalid remote direct broadcast length"))
-				return
-			}
-			topic = string(message[:topicNameLen])
-			message = message[topicNameLen:]
-		}
-
-		// [from: 20 bytes] [message: ...]
 		if len(message) < 20 {
 			log.Error().
 				Str("topic", topic).
@@ -267,7 +305,6 @@ func Dispatch(topic string, message []byte) {
 			return
 		}
 		fromBytes := message[:20]
-		message = message[20:]
 
 		fromID, err := ksuid.FromBytes(fromBytes)
 		if err != nil {
@@ -280,6 +317,59 @@ func Dispatch(topic string, message []byte) {
 		}
 		from := fromID.String()
 
+		// [message: ...]
+		// [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
+		message = message[20:]
+
+		// Check if is a direct broadcast
+		if msgType == messageTypeDirectBroadcast {
+			if topic != directTopic {
+				log.Error().Caller(1).
+					Str("topic", topic).
+					Str("expected", directTopic).
+					Str("adapter", config.Adapter.Name()).
+					Msg(_l("Invalid topic for remote direct broadcast message"))
+				return
+			}
+
+			// [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
+			if len(message) < 25 {
+				log.Error().Caller(1).
+					Str("adapter", config.Adapter.Name()).
+					Msg(_l("Invalid remote direct broadcast length"))
+				return
+			}
+
+			toBytes := message[0:20]
+			message = message[20:]
+
+			if !bytes.Equal(selfIdBytes, toBytes) {
+				log.Error().Caller(1).
+					Str("adapter", config.Adapter.Name()).
+					Msg(_l("Invalid remote direct broadcast destination"))
+				return
+			}
+
+			// [topicNameLen: uint] [topic: topicNameLen] [message: ...]
+			topicNameLen := int(binary.BigEndian.Uint32(message[0:4]))
+			message = message[4:]
+
+			if len(message) < topicNameLen {
+				log.Error().
+					Str("adapter", config.Adapter.Name()).
+					Msg(_l("Invalid remote direct broadcast length"))
+				return
+			}
+			topic = string(message[:topicNameLen])
+			message = message[topicNameLen:]
+		} else if msgType != messageTypeBroadcast {
+			log.Error().
+				Str("topic", topic).
+				Str("adapter", config.Adapter.Name()).
+				Msg(_l("Invalid remote message type"))
+			return
+		}
+
 		dispatchMessage(topic, message, from)
 	}
 }
@@ -289,7 +379,7 @@ func Dispatch(topic string, message []byte) {
 // `topic` - The topic to broadcast to, ie: `"users:123"`
 // `message` - The payload of the broadcast
 func LocalBroadcast(topic string, message any) {
-	dispatchMessage(topic, message, selfString)
+	dispatchMessage(topic, message, selfIdString)
 }
 
 // SetAdapters configure the adapters topics.
@@ -303,6 +393,13 @@ func LocalBroadcast(topic string, message any) {
 //		{&RedisAdapter{Addr: "global.redis-host:6379"}, []string{"*"}},
 //	})
 func SetAdapters(adapters []AdapterConfig) {
+
+	if config := GetAdapter(directTopic); config != nil {
+		// direct broadcast
+		config.Adapter.Unsubscribe(directTopic)
+	}
+	defer trySubscribe(directTopic)
+
 	p.adapters = &pkg.WildcardStore[*AdapterConfig]{}
 	for _, config := range adapters {
 		for _, topic := range config.Topics {
@@ -313,14 +410,13 @@ func SetAdapters(adapters []AdapterConfig) {
 			}
 		}
 	}
-
-	// direct broadcast
-	Unsubscribe(directTopic, directDispatcher)
-	Subscribe(directTopic, directDispatcher)
 }
 
 // GetAdapter Gets the adapter associated with a topic.
 func GetAdapter(topic string) *AdapterConfig {
+	if p.adapters == nil {
+		return nil
+	}
 	return p.adapters.Match(topic)
 }
 
@@ -360,6 +456,7 @@ func scheduleUnsubscribe(topic string) {
 		// was removed by pubsub.trySubscribe
 		return
 	}
+	delete(p.unsubscribeTimers, topic)
 
 	if config := GetAdapter(topic); config != nil {
 		config.Adapter.Unsubscribe(topic)
@@ -370,7 +467,7 @@ func scheduleUnsubscribe(topic string) {
 func dispatchMessage(topic string, message any, from string) {
 	go func() {
 		if from == "" {
-			from = selfString
+			from = selfIdString
 		}
 
 		// get subscriptions & dispatchers
@@ -395,11 +492,6 @@ func dispatchMessage(topic string, message any, from string) {
 		}
 	}()
 }
-
-// dispatchMessage messages sent directly to this node
-var directDispatcher = DispatcherFunc(func(topic string, message any, from string) {
-
-})
 
 func _l(msg string) string {
 	return "[chain.pubsub] " + msg

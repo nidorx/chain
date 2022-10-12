@@ -32,12 +32,12 @@ func main() {
 	pubsub.Broadcast("user:123", []byte("Message 2"))
 
 	// await
-	<-time.After(time.Second)
+	<-time.After(time.Millisecond * 10)
 
 	pubsub.Unsubscribe("user:123", dispatcher)
 
 	pubsub.Broadcast("user:123", []byte("Message Ignored"))
 
 	// await
-	<-time.After(time.Second)
+	<-time.After(time.Millisecond * 10)
 }
