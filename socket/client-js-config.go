@@ -27,14 +27,14 @@ func clientJsAddHandler(router *chain.Router) {
 		return
 	}
 
-	router.GET("/syntax-chain.js", func(ctx *chain.Context) {
+	router.GET("/chain.js", func(ctx *chain.Context) {
 		ctx.SetHeader("Content-Type", "application/javascript")
 		// Content-Length
 		// Etag
 		// Last-Modified
 		if _, err := ctx.Write(clientJsContent); err != nil {
 			log.Error().Stack().Err(err).Caller(1).
-				Msg(_l("it was not possible to deliver /syntax-chain.js"))
+				Msg(_l("it was not possible to deliver /chain.js"))
 		}
 	})
 }
