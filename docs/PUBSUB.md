@@ -70,7 +70,7 @@ message to all nodes in the cluster (via redis for example). The Adapter should 
 the current node, as PubSub is responsible for local message deliveries.
 
 When the adapter receives a message from its backend (redis for example), the adapter must invoke
-the `pubsub.LocalBroadcast(topic string, message any)` method so that PubSub can deliver the message to all dispatchers.
+the `pubsub.Dispatch(topic string, message any)` method so that PubSub can deliver the message to all dispatchers.
 
 ## API
 

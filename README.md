@@ -228,7 +228,7 @@ channel.on('other_event', (message) => chain.log('OtherEvent', message))
 
 ### More about Socket & Channels
 
-- [Socket & Channels docs](/socket/README.md)
+- [Socket & Channels docs](/docs/SOCKET.md)
 - [`/examples/socket-chat`](/examples/socket-chat)
 
 ## Crypto
