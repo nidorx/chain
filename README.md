@@ -248,5 +248,6 @@ Features:
 
 ### More about Crypto
 
+- [Crypto docs](/docs/CRYPTO.md)
 - [`/examples/crypto`](/examples/crypto)
 
