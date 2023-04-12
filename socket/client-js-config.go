@@ -4,6 +4,7 @@ import (
 	"embed"
 	"github.com/rs/zerolog/log"
 	"github.com/syntax-framework/chain"
+	"strconv"
 )
 
 var (
@@ -22,14 +23,14 @@ func init() {
 	}
 }
 
-func clientJsAddHandler(router *chain.Router) {
+func ClientJsAddHandler(router *chain.Router) {
 	if _, exist := configuredRouterClient[router]; exist {
 		return
 	}
 
 	router.GET("/chain.js", func(ctx *chain.Context) {
 		ctx.SetHeader("Content-Type", "application/javascript")
-		// Content-Length
+		ctx.SetHeader("Content-Length", strconv.Itoa(len(clientJsContent)))
 		// Etag
 		// Last-Modified
 		if _, err := ctx.Write(clientJsContent); err != nil {

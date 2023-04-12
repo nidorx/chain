@@ -44,7 +44,7 @@ type Handler struct {
 
 func (h *Handler) Configure(router *chain.Router, endpoint string) {
 
-	clientJsAddHandler(router)
+	ClientJsAddHandler(router)
 
 	if h.Options == nil {
 		h.Options = map[string]any{}
