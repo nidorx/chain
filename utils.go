@@ -2,8 +2,10 @@ package chain
 
 import (
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"hash/crc32"
 )
 
 type Serializer interface {
@@ -30,4 +32,12 @@ func HashMD5(text string) string {
 	h := md5.New()
 	h.Write([]byte(text))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+var crc32iSCSI = crc32.MakeTable(crc32.Castagnoli)
+
+func HashCrc32(content []byte) string {
+	h := crc32.New(crc32iSCSI)
+	h.Write(content)
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
