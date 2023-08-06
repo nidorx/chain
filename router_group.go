@@ -26,7 +26,7 @@ func (r *RouterGroup) POST(route string, handle any)    { r.r.POST(r.p+route, ha
 func (r *RouterGroup) PUT(route string, handle any)     { r.r.PUT(r.p+route, handle) }
 func (r *RouterGroup) PATCH(route string, handle any)   { r.r.PATCH(r.p+route, handle) }
 func (r *RouterGroup) DELETE(route string, handle any)  { r.r.DELETE(r.p+route, handle) }
-func (r *RouterGroup) Use(args ...any) Group            { return r.Use(args...) }
+func (r *RouterGroup) Use(args ...any) Group            { return r.r.Use(args...) }
 func (r *RouterGroup) Group(route string) Group         { return &RouterGroup{r.p + route, r.r} }
 func (r *RouterGroup) Handle(method string, route string, handle any) {
 	r.r.Handle(method, r.p+route, handle)
