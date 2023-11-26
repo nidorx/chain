@@ -1,7 +1,7 @@
 package session
 
 import (
-	"github.com/syntax-framework/chain"
+	"github.com/nidorx/chain"
 	"net/http"
 	"time"
 )

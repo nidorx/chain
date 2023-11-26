@@ -2,8 +2,9 @@ package chain
 
 import (
 	"bytes"
-	"github.com/syntax-framework/chain/crypto"
 	"sync"
+
+	"github.com/nidorx/chain/crypto"
 )
 
 type SecretKeySyncFunc func(key string)

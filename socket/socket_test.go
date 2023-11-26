@@ -3,7 +3,7 @@ package socket
 import (
 	"context"
 	"errors"
-	"github.com/syntax-framework/chain"
+	"github.com/nidorx/chain"
 	"sync"
 	"testing"
 	"time"

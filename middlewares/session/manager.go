@@ -2,8 +2,8 @@ package session
 
 import (
 	"errors"
+	"github.com/nidorx/chain"
 	"github.com/rs/zerolog/log"
-	"github.com/syntax-framework/chain"
 	"net/http"
 	"strings"
 	"time"

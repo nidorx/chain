@@ -22,9 +22,9 @@
 package session
 
 import (
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/crypto"
 	"github.com/rs/zerolog/log"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/crypto"
 	"strings"
 )
 

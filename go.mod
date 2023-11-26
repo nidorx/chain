@@ -1,4 +1,4 @@
-module github.com/syntax-framework/chain
+module github.com/nidorx/chain
 
 go 1.18
 

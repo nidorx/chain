@@ -2,8 +2,8 @@ package pubsub
 
 import (
 	"bytes"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/crypto"
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/crypto"
 )
 
 var globalKeyring = chain.NewKeyring("chain.pubsub.keyring.salt", 1000, 32, "sha256")

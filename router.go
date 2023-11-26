@@ -5,8 +5,8 @@ package chain
 
 import (
 	"context"
+	"github.com/nidorx/chain/pkg"
 	"github.com/rs/zerolog/log"
-	"github.com/syntax-framework/chain/pkg"
 	"net/http"
 	"reflect"
 	"strings"

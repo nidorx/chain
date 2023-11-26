@@ -116,7 +116,7 @@ println(base64.StdEncoding.EncodeToString(signSecret))
 
 `MessageVerifier` makes it easy to generate and verify messages which are signed to prevent tampering.
 
-For example, the [cookie store](https://github.com/syntax-framework/chain/blob/main/middlewares/session/store_cookie.go)
+For example, the [cookie store](https://github.com/nidorx/chain/blob/main/middlewares/session/store_cookie.go)
 uses this verifier to send data to the client. The data can be read by the client, but cannot be tampered with.
 
 The message and its verification are base64url encoded and returned to you.

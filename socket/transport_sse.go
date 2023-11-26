@@ -2,8 +2,8 @@ package socket
 
 import (
 	"fmt"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/middlewares/session"
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/middlewares/session"
 	"io"
 	"net/http"
 	"time"

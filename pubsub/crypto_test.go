@@ -1,7 +1,7 @@
 package pubsub
 
 import (
-	"github.com/syntax-framework/chain"
+	"github.com/nidorx/chain"
 	"reflect"
 	"testing"
 )

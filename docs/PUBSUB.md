@@ -11,8 +11,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/pubsub"
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/pubsub"
 	"time"
 )
 
@@ -58,7 +58,7 @@ Chain PubSub was designed to be flexible and support multiple backends.
 
 ![pubsub-adapter.png](pubsub-adapter.png)
 
-The [`Interface`](https://github.com/syntax-framework/chain/blob/7e2b575140931f1ff8a50540519ec287ec5c8078/pubsub/pubsub.go#L12-L18)
+The [`Interface`](https://github.com/nidorx/chain/blob/7e2b575140931f1ff8a50540519ec287ec5c8078/pubsub/pubsub.go#L12-L18)
 of an Adapter is very simple, making it easy to implement custom adapters.
 
 The `Subscribe(topic string)` and `Unsubscribe(topic string)` methods are invoked by PubSub ensuring that the current
@@ -91,8 +91,8 @@ RedisAdapter.
 package main
 
 import (
-	"github.com/syntax-framework/chain/pubsub"
-	"github.com/syntax-framework/chain-pubsub-redis"
+	"github.com/nidorx/chain/pubsub"
+	"github.com/nidorx/chain-pubsub-redis"
 )
 
 func main() {

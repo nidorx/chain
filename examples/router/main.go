@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/syntax-framework/chain"
+	"github.com/nidorx/chain"
 	"log"
 	"net/http"
 )

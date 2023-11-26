@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/base64"
-	"github.com/syntax-framework/chain"
+	"github.com/nidorx/chain"
 )
 
 func main() {

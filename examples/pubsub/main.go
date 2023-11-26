@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/pubsub"
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/pubsub"
 	"time"
 )
 

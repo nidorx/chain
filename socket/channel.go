@@ -2,10 +2,10 @@ package socket
 
 import (
 	"fmt"
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/pkg"
+	"github.com/nidorx/chain/pubsub"
 	"github.com/rs/zerolog/log"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/pkg"
-	"github.com/syntax-framework/chain/pubsub"
 	"sync"
 )
 

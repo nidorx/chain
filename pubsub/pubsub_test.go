@@ -1,8 +1,8 @@
 package pubsub
 
 import (
+	"github.com/nidorx/chain"
 	"github.com/segmentio/ksuid"
-	"github.com/syntax-framework/chain"
 	"reflect"
 	"sync"
 	"testing"

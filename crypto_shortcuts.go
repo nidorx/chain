@@ -1,6 +1,6 @@
 package chain
 
-import "github.com/syntax-framework/chain/crypto"
+import "github.com/nidorx/chain/crypto"
 
 var (
 	crypt        = &cryptoShortcuts{}

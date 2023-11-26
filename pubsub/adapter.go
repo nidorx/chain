@@ -1,6 +1,6 @@
 package pubsub
 
-import "github.com/syntax-framework/chain/crypto"
+import "github.com/nidorx/chain/crypto"
 
 // Adapter Specification to implement a custom PubSub adapter.
 type Adapter interface {

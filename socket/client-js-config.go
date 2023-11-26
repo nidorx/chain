@@ -3,8 +3,8 @@ package socket
 import (
 	"bytes"
 	"embed"
+	"github.com/nidorx/chain"
 	"github.com/rs/zerolog/log"
-	"github.com/syntax-framework/chain"
 	"net/http"
 	"path"
 	"strconv"

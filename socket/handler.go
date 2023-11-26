@@ -1,9 +1,9 @@
 package socket
 
 import (
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/pkg"
 	"github.com/rs/zerolog/log"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/pkg"
 	"sync"
 )
 

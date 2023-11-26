@@ -6,9 +6,10 @@
     </p>    
 </div>
 
-<a href="https://github.com/syntax-framework/syntax"><img width="160" src="./docs/logo-syntax.png" /></a>
+[//]: # (<a href="https://github.com/syntax-framework/syntax"><img width="160" src="./docs/logo-syntax.png" /></a>)
 
-**chain** is part of the [Syntax Framework](https://github.com/syntax-framework/syntax)
+[//]: # ()
+[//]: # (**chain** is part of the [Syntax Framework]&#40;https://github.com/syntax-framework/syntax&#41;)
 
 ---
 
@@ -25,7 +26,7 @@ elegant and safe way.
 ## Installation
 
 ```
-go get github.com/syntax-framework/chain
+go get github.com/nidorx/chain
 ```
 
 ## Router
@@ -47,7 +48,7 @@ It also scales better.
 package main
 
 import (
-	"github.com/syntax-framework/chain"
+	"github.com/nidorx/chain"
 	"log"
 	"net/http"
 )
@@ -109,8 +110,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/pubsub"
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/pubsub"
 	"time"
 )
 
@@ -173,8 +174,8 @@ Server
 package main
 
 import (
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/socket"
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/socket"
 	"log"
 	"net/http"
 )

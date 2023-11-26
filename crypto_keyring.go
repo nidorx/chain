@@ -1,8 +1,8 @@
 package chain
 
 import (
+	"github.com/nidorx/chain/crypto"
 	"github.com/rs/zerolog/log"
-	"github.com/syntax-framework/chain/crypto"
 )
 
 // NewKeyring starts a Keyring that will be updated whenever SecretKeySync() is invoked

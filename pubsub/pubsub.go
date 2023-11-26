@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"github.com/nidorx/chain/pkg"
 	"github.com/rs/zerolog/log"
 	"github.com/segmentio/ksuid"
-	"github.com/syntax-framework/chain/pkg"
 	"sync"
 	"time"
 )

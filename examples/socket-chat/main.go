@@ -3,8 +3,8 @@ package main
 import (
 	"embed"
 	"fmt"
-	"github.com/syntax-framework/chain"
-	"github.com/syntax-framework/chain/socket"
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/socket"
 	"log"
 	"net/http"
 	"os"
