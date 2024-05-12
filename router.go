@@ -5,12 +5,14 @@ package chain
 
 import (
 	"context"
-	"github.com/nidorx/chain/pkg"
-	"github.com/rs/zerolog/log"
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
 	"sync"
+
+	"github.com/nidorx/chain/pkg"
+	"github.com/rs/zerolog/log"
 )
 
 // Router is a high-performance router.
@@ -78,38 +80,38 @@ func (r *Router) Group(route string) Group {
 }
 
 // GET is a shortcut for router.handleFunc(http.MethodGet, Route, handle)
-func (r *Router) GET(route string, handle any) {
-	r.Handle(http.MethodGet, route, handle)
+func (r *Router) GET(route string, handle any) error {
+	return r.Handle(http.MethodGet, route, handle)
 }
 
 // HEAD is a shortcut for router.handleFunc(http.MethodHead, Route, handle)
-func (r *Router) HEAD(route string, handle any) {
-	r.Handle(http.MethodHead, route, handle)
+func (r *Router) HEAD(route string, handle any) error {
+	return r.Handle(http.MethodHead, route, handle)
 }
 
 // OPTIONS is a shortcut for router.handleFunc(http.MethodOptions, Route, handle)
-func (r *Router) OPTIONS(route string, handle any) {
-	r.Handle(http.MethodOptions, route, handle)
+func (r *Router) OPTIONS(route string, handle any) error {
+	return r.Handle(http.MethodOptions, route, handle)
 }
 
 // POST is a shortcut for router.handleFunc(http.MethodPost, Route, handle)
-func (r *Router) POST(route string, handle any) {
-	r.Handle(http.MethodPost, route, handle)
+func (r *Router) POST(route string, handle any) error {
+	return r.Handle(http.MethodPost, route, handle)
 }
 
 // PUT is a shortcut for router.handleFunc(http.MethodPut, Route, handle)
-func (r *Router) PUT(route string, handle any) {
-	r.Handle(http.MethodPut, route, handle)
+func (r *Router) PUT(route string, handle any) error {
+	return r.Handle(http.MethodPut, route, handle)
 }
 
 // PATCH is a shortcut for router.handleFunc(http.MethodPatch, Route, handle)
-func (r *Router) PATCH(route string, handle any) {
-	r.Handle(http.MethodPatch, route, handle)
+func (r *Router) PATCH(route string, handle any) error {
+	return r.Handle(http.MethodPatch, route, handle)
 }
 
 // DELETE is a shortcut for router.handleFunc(http.MethodDelete, Route, handle)
-func (r *Router) DELETE(route string, handle any) {
-	r.Handle(http.MethodDelete, route, handle)
+func (r *Router) DELETE(route string, handle any) error {
+	return r.Handle(http.MethodDelete, route, handle)
 }
 
 // Configure allows a RouteConfigurator to perform route configurations
@@ -117,21 +119,28 @@ func (r *Router) Configure(route string, configurator RouteConfigurator) {
 	configurator.Configure(r, route)
 }
 
+var (
+	ErrInvalidHandler = errors.New("invalid handler")
+	ErrInvalidMethod  = errors.New("method must not be empty")
+	ErrInvalidPath    = errors.New("path must begin with '/'")
+	ErrHandlerIsNil   = errors.New("handle must not be nil")
+)
+
 // Handle registers a new Route for the given method and path.
-func (r *Router) Handle(method string, route string, handle any) {
+func (r *Router) Handle(method string, route string, handle any) error {
+	method = strings.TrimSpace(method)
 	if method == "" {
-		log.Panic().
-			Msg(_l("method must not be empty"))
+		return ErrInvalidMethod
 	}
+
+	route = pkg.PathClean(route)
+
 	if len(route) < 1 || route[0] != '/' {
-		log.Panic().
-			Str("route", route).
-			Msg(_l("path must begin with '/'"))
+		return ErrInvalidPath
 	}
+
 	if handle == nil {
-		log.Panic().
-			Str("route", route).
-			Msg(_l("handle must not be nil"))
+		return ErrHandlerIsNil
 	}
 
 	if r.registries == nil {
@@ -184,10 +193,10 @@ func (r *Router) Handle(method string, route string, handle any) {
 			return handler(ctx.Writer, ctx.Request.WithContext(reqCtx))
 		})
 	} else {
-		log.Panic().
-			Str("handler", reflect.TypeOf(handle).String()).
-			Msg(_l("invalid handler"))
+		return ErrInvalidHandler
 	}
+
+	return nil
 }
 
 // Use registers a middleware routeT that will match requests with the provided prefix (which is optional and defaults to "/*").

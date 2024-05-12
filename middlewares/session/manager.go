@@ -2,11 +2,12 @@ package session
 
 import (
 	"errors"
-	"github.com/nidorx/chain"
-	"github.com/rs/zerolog/log"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/nidorx/chain"
+	"github.com/rs/zerolog/log"
 )
 
 var globalManagers = map[*chain.Router]*Manager{}
@@ -92,7 +93,7 @@ func (m *Manager) beforeSend(ctx *chain.Context, sid string, session *Session) {
 	case drop:
 		if sid != "" {
 			m.Store.Delete(ctx, sid)
-			ctx.DeleteCookie(m.Key)
+			ctx.RemoveCookie(m.Key)
 		}
 	case renew:
 		if sid != "" {
