@@ -4,18 +4,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 )
-
-// BodyAs(obj) err                     // request body as specified class (deserialized from JSON)
-// QueryAs(obj) err                    // request body as specified class (deserialized from JSON)
-
-// Request methods
-// body()                                // request body as string
-// bodyAsBytes()                         // request body as array of bytes
 
 // BodyBytes get body as array of bytes
 func (ctx *Context) BodyBytes() (body []byte, err error) {
-	if cb := ctx.Get(BodyBytesKey); cb != nil {
+	if cb, exist := ctx.Get(BodyBytesKey); exist && cb != nil {
 		if cbb, ok := cb.([]byte); ok {
 			body = cbb
 		}
@@ -32,51 +26,47 @@ func (ctx *Context) BodyBytes() (body []byte, err error) {
 	return
 }
 
-// bodyStreamAsClass(clazz)              // request body as specified class (memory optimized version of above)
-// bodyValidator(clazz)                  // request body as validator typed as specified class
-// bodyInputStream()                     // the underyling input stream of the request
+// GetParam returns the value of the first Param which key matches the given name.
+// If no matching Param is found, an empty string is returned.
+func (ctx *Context) GetParam(name string) string {
+	for i := 0; i < ctx.paramCount; i++ {
+		if ctx.paramNames[i] == name {
+			return ctx.paramValues[i]
+		}
+	}
+	return ""
+}
 
-// formParam("name")                     // form parameter by name, as string
-// formParamAsClass("name", clazz)       // f orm parameter by name, as validator typed as specified class
-// formParams("name")                    // list of form parameters by name
-// formParamMap()                        // map of all form parameters
+// GetParamByIndex get one parameter per index
+func (ctx *Context) GetParamByIndex(index int) string {
+	return ctx.paramValues[index]
+}
 
-// pathParam("name")                     // path parameter by name as string
-// pathParamAsClass("name", clazz)       // path parameter as validator typed as specified class
-// pathParamMap()                        // map of all path parameters
+// @TODO: cache
+func (ctx *Context) QueryParam(name string, defaultValue ...string) string {
+	if val := ctx.Request.URL.Query().Get(name); val != "" {
+		return val
+	}
+	for _, v := range defaultValue {
+		return v
+	}
+	return ""
+}
 
-// queryParam("name")                    // query param by name as string
-// queryParamAsClass("name", clazz)      // query param parameter by name, as validator typed as specified class
-// queryParams("name")                   // list of query parameters by name
-// queryParamMap()                       // map of all query parameters
-// queryString()                         // full query string
-
-// uploadedFile("name")                  // uploaded file by name
-// uploadedFiles("name")                 // all uploaded files by name
-// uploadedFiles()                       // all uploaded files as list
-// uploadedFileMap()                     // all uploaded files as a "names by files" map
-
-// basicAuthCredentials()                // basic auth credentials (or null if not set)
-
-// attribute("name", value)              // set an attribute on the request
-// attribute("name")                     // get an attribute on the request
-// attributeOrCompute("name", ctx -> {}) // get an attribute or compute it based on the context if absent
-// attributeMap()                        // map of all attributes on the request
-
-// contentLength()                       // content length of the request body
-// contentType()                         // request content type
-
-// isMultipart()                         // true if the request is multipart
-// isMultipartFormData()                 // true if the request is multipart/formdata
-
-// sessionAttribute("name", value)       // set a session attribute
-// sessionAttribute("name")              // get a session attribute
-// consumeSessionAttribute("name")       // get a session attribute, and set value to null
-// cachedSessionAttribute("name", value) // set a session attribute, and cache the value as a request attribute
-// cachedSessionAttribute("name")        // get a session attribute, and cache the value as a request attribute
-// cachedSessionAttributeOrCompute(...)  // same as above, but compute and set if value is absent
-// sessionAttributeMap()                 // map of all session attributes
-// cookieMap()                           // map of all request cookies
+func (ctx *Context) QueryParamInt(name string, defaultValue ...int) int {
+	str := ctx.QueryParam(name, "0")
+	if str == "" {
+		for _, v := range defaultValue {
+			return v
+		}
+		return 0
+	}
+	val, err := strconv.Atoi(str)
+	if err != nil {
+		return 0
+	}
+	return val
+}
 
 // Host host as string
 func (ctx *Context) Host() string {
@@ -117,10 +107,6 @@ func (ctx *Context) GetCookie(name string) *http.Cookie {
 	}
 	return nil
 }
-
-// header("name")                        // request header by name (can be used with Header.HEADERNAME)
-// headerAsClass("name", clazz)          // request header by name, as validator typed as specified class
-// headerMap()                           // map of all request headers
 
 // GetHeader gets the first value associated with the given key. If there are no values associated with the key,
 // GetHeader returns "".

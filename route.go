@@ -2,7 +2,7 @@ package chain
 
 import (
 	"fmt"
-	"github.com/rs/zerolog/log"
+	"log/slog"
 	"strings"
 )
 
@@ -63,8 +63,11 @@ func (r *Route) Dispatch(ctx *Context) error {
 			calledNext := false
 			nextMid := func() error {
 				if calledNext {
-					log.Warn().Int("index", index).Str("path", ctx.path).
-						Msg(_l("calling next() multiple times for route"))
+					slog.Warn(
+						"[chain] calling next() multiple times for route",
+						slog.Int("index", index),
+						slog.String("path", ctx.path),
+					)
 
 					return nextErr
 				}
@@ -96,6 +99,10 @@ type PathDetails struct {
 	hasWildcard  bool     // possui wildcard
 	params       []string // os nomes dos parametros no path. Ex. ["category", "filepath"]
 	paramsIndex  []int    // os indices de segmentos parametricos no path. Ex. [0, 2]
+}
+
+func (d PathDetails) Params() (segments []string, params []string, indexes []int) {
+	return d.segments, d.params, d.paramsIndex
 }
 
 func (d PathDetails) String() string {
@@ -281,15 +288,11 @@ func ParsePathDetails(pathOrig string) *PathDetails {
 		part := path[ctx.pathSegments[i]+1 : ctx.pathSegments[i+1]]
 		if strings.IndexByte(part, parameter) == 0 {
 			if len(part) == 1 {
-				log.Panic().
-					Str("path", path).
-					Msg(_l("is necessary to inform the name of the parameter"))
+				panic(fmt.Sprintf("[chain] is necessary to inform the name of the parameter. path: %s", path))
 			}
 			paramName := part[1:]
 			if strings.IndexByte(paramName, wildcard) >= 0 || strings.IndexByte(paramName, parameter) >= 0 {
-				log.Panic().
-					Str("path", path).
-					Msg(_l("only one wildcard per path segment is allowed"))
+				panic(fmt.Sprintf("[chain] only one wildcard per path segment is allowed. path: %s", path))
 			}
 			details.hasParameter = true
 			details.segments = append(details.segments, string(parameter))
@@ -297,18 +300,14 @@ func ParsePathDetails(pathOrig string) *PathDetails {
 			details.paramsIndex = append(details.paramsIndex, i)
 		} else if strings.IndexByte(part, wildcard) == 0 {
 			if details.hasWildcard {
-				log.Panic().
-					Str("path", path).
-					Msg(_l("catch-all routes are only allowed at the end of the path"))
+				panic(fmt.Sprintf("[chain] catch-all routes are only allowed at the end of the path. path: %s", path))
 			}
 			paramName := part[1:]
 			if paramName == "" {
 				paramName = "filepath"
 			}
 			if strings.IndexByte(paramName, wildcard) >= 0 || strings.IndexByte(paramName, parameter) >= 0 {
-				log.Panic().
-					Str("path", path).
-					Msg(_l("only one wildcard per path segment is allowed"))
+				panic(fmt.Sprintf("[chain] only one wildcard per path segment is allowed. path: %s", path))
 			}
 			details.hasWildcard = true
 			details.segments = append(details.segments, string(wildcard))

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"github.com/nidorx/chain/pkg"
-	"github.com/rs/zerolog/log"
-	"github.com/segmentio/ksuid"
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/nidorx/chain/pkg"
+	"github.com/segmentio/ksuid"
 )
 
 var (
@@ -126,7 +128,10 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	if config.DisableCompression == false {
 		var compressed []byte
 		if compressed, err = compressPayload(msgToSend); err != nil {
-			log.Warn().Err(err).Msg(_l("Failed to compress payload"))
+			slog.Warn(
+				"[chain] Failed to compress payload",
+				slog.Any("error", err),
+			)
 		} else if len(compressed) < len(msgToSend) {
 			// Only use compression if it reduced the size
 			msgToSend = compressed
@@ -141,8 +146,7 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 		}
 		var encrypted []byte
 		if encrypted, err = encryptPayload(keyring, msgToSend); err != nil {
-			log.Error().Err(err).Msg(_l("Encryption of message failed"))
-			return err
+			return errors.Join(errors.New("encryption of message failed"), err)
 		}
 		msgToSend = encrypted
 	}
@@ -209,7 +213,10 @@ func broadcastMessage(msgType messageType, topic string, message []byte, options
 	if config.DisableCompression == false {
 		var compressed []byte
 		if compressed, err = compressPayload(msgToSend); err != nil {
-			log.Warn().Err(err).Msg(_l("Failed to compress payload"))
+			slog.Warn(
+				"[chain] Failed to compress payload",
+				slog.Any("error", err),
+			)
 		} else if len(compressed) < len(msgToSend) {
 			// Only use compression if it reduced the size
 			msgToSend = compressed
@@ -224,8 +231,7 @@ func broadcastMessage(msgType messageType, topic string, message []byte, options
 		}
 		var encrypted []byte
 		if encrypted, err = encryptPayload(keyring, msgToSend); err != nil {
-			log.Error().Err(err).Msg(_l("Encryption of message failed"))
-			return err
+			return errors.Join(errors.New("encryption of message failed"), err)
 		}
 		msgToSend = encrypted
 	}
@@ -244,10 +250,11 @@ func Dispatch(topic string, message []byte) {
 		// Check if the message is encrypted
 		if msgType == messageTypeEncrypt {
 			if config.DisableEncryption {
-				log.Error().
-					Str("topic", topic).
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Remote message is encrypted and encryption is not configured"))
+				slog.Error(
+					"[chain.pubsub] remote message is encrypted and encryption is not configured",
+					slog.String("Topic", topic),
+					slog.String("Adapter", config.Adapter.Name()),
+				)
 				return
 			}
 
@@ -257,11 +264,12 @@ func Dispatch(topic string, message []byte) {
 			}
 			plain, err := decryptPayload(keyring, message)
 			if err != nil {
-				log.Error().
-					Err(err).
-					Str("topic", topic).
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Could not decrypt remote message"))
+				slog.Error(
+					"[chain.pubsub] could not decrypt remote message",
+					slog.Any("Error", err),
+					slog.String("Topic", topic),
+					slog.String("Adapter", config.Adapter.Name()),
+				)
 				return
 			}
 
@@ -269,10 +277,11 @@ func Dispatch(topic string, message []byte) {
 			msgType = messageType(plain[0])
 			message = plain
 		} else if config.DisableEncryption == false {
-			log.Error().
-				Str("topic", topic).
-				Str("adapter", config.Adapter.Name()).
-				Msg(_l("Encryption is configured but remote message is not encrypted"))
+			slog.Error(
+				"[chain.pubsub] encryption is configured but remote message is not encrypted",
+				slog.String("Topic", topic),
+				slog.String("Adapter", config.Adapter.Name()),
+			)
 			return
 		}
 
@@ -280,11 +289,12 @@ func Dispatch(topic string, message []byte) {
 		if msgType == messageTypeCompress {
 			decompressed, err := decompressPayload(message)
 			if err != nil {
-				log.Error().
-					Err(err).
-					Str("topic", topic).
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Could not decompress remote message"))
+				slog.Error(
+					"[chain.pubsub] could not decompress remote message",
+					slog.Any("Error", err),
+					slog.String("Topic", topic),
+					slog.String("Adapter", config.Adapter.Name()),
+				)
 				return
 			}
 
@@ -298,21 +308,23 @@ func Dispatch(topic string, message []byte) {
 		message = message[1:]
 
 		if len(message) < 20 {
-			log.Error().
-				Str("topic", topic).
-				Str("adapter", config.Adapter.Name()).
-				Msg(_l("Invalid remote message length"))
+			slog.Error(
+				"[chain.pubsub] invalid remote message length",
+				slog.String("Topic", topic),
+				slog.String("Adapter", config.Adapter.Name()),
+			)
 			return
 		}
 		fromBytes := message[:20]
 
 		fromID, err := ksuid.FromBytes(fromBytes)
 		if err != nil {
-			log.Error().
-				Err(err).
-				Str("topic", topic).
-				Str("adapter", config.Adapter.Name()).
-				Msg(_l(`Invalid remote message from`))
+			slog.Error(
+				"[chain.pubsub] invalid remote message from",
+				slog.Any("Error", err),
+				slog.String("Topic", topic),
+				slog.String("Adapter", config.Adapter.Name()),
+			)
 			return
 		}
 		from := fromID.String()
@@ -324,19 +336,22 @@ func Dispatch(topic string, message []byte) {
 		// Check if is a direct broadcast
 		if msgType == messageTypeDirectBroadcast {
 			if topic != directTopic {
-				log.Error().Caller(1).
-					Str("topic", topic).
-					Str("expected", directTopic).
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Invalid topic for remote direct broadcast message"))
+				slog.Error(
+					"[chain.pubsub] invalid topic for remote direct broadcast message",
+					slog.String("Topic", topic),
+					slog.String("Adapter", config.Adapter.Name()),
+					slog.String("Expected", directTopic),
+				)
 				return
 			}
 
 			// [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
 			if len(message) < 25 {
-				log.Error().Caller(1).
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Invalid remote direct broadcast length"))
+				slog.Error(
+					"[chain.pubsub] invalid remote direct broadcast length",
+					slog.String("Topic", topic),
+					slog.String("Adapter", config.Adapter.Name()),
+				)
 				return
 			}
 
@@ -344,9 +359,10 @@ func Dispatch(topic string, message []byte) {
 			message = message[20:]
 
 			if !bytes.Equal(selfIdBytes, toBytes) {
-				log.Error().Caller(1).
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Invalid remote direct broadcast destination"))
+				slog.Error(
+					"[chain.pubsub] invalid remote direct broadcast destination",
+					slog.String("Adapter", config.Adapter.Name()),
+				)
 				return
 			}
 
@@ -355,18 +371,20 @@ func Dispatch(topic string, message []byte) {
 			message = message[4:]
 
 			if len(message) < topicNameLen {
-				log.Error().
-					Str("adapter", config.Adapter.Name()).
-					Msg(_l("Invalid remote direct broadcast length"))
+				slog.Error(
+					"[chain.pubsub] invalid remote direct broadcast length",
+					slog.String("Adapter", config.Adapter.Name()),
+				)
 				return
 			}
 			topic = string(message[:topicNameLen])
 			message = message[topicNameLen:]
 		} else if msgType != messageTypeBroadcast {
-			log.Error().
-				Str("topic", topic).
-				Str("adapter", config.Adapter.Name()).
-				Msg(_l("Invalid remote message type"))
+			slog.Error(
+				"[chain.pubsub] invalid remote message type",
+				slog.String("Topic", topic),
+				slog.String("Adapter", config.Adapter.Name()),
+			)
 			return
 		}
 
@@ -404,9 +422,7 @@ func SetAdapters(adapters []AdapterConfig) {
 	for _, config := range adapters {
 		for _, topic := range config.Topics {
 			if err := p.adapters.Insert(topic, &config); err != nil {
-				log.Panic().Err(err).
-					Str("topic", topic).
-					Msg(_l("invalid adapter config"))
+				panic(fmt.Sprintf("[chain.pubsub] invalid adapter config. Topic: %s, Error: %s", topic, err.Error()))
 			}
 		}
 	}
@@ -491,8 +507,4 @@ func dispatchMessage(topic string, message any, from string) {
 			dispatcher.Dispatch(topic, message, from)
 		}
 	}()
-}
-
-func _l(msg string) string {
-	return "[chain.pubsub] " + msg
 }

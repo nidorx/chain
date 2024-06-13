@@ -22,6 +22,30 @@ func (ctx *Context) Json(v any) {
 	}
 }
 
+// WriteStarted returns true if the ctx.Writer.Write or ctx.Writer.WriteHeader method was called
+func (ctx *Context) WriteStarted() bool {
+	if w, ok := ctx.Writer.(*ResponseWriterSpy); ok {
+		return w.writeStarted
+	}
+	return true
+}
+
+// WriteCalled returns true if the ctx.Writer.Write method was called
+func (ctx *Context) WriteCalled() bool {
+	if w, ok := ctx.Writer.(*ResponseWriterSpy); ok {
+		return w.writeCalled
+	}
+	return true
+}
+
+// WriteCalled returns true if the ctx.Writer.WriteHeader method was called
+func (ctx *Context) WriteHeaderCalled() bool {
+	if w, ok := ctx.Writer.(*ResponseWriterSpy); ok {
+		return w.writeHeaderCalled
+	}
+	return true
+}
+
 // ServeContent replies to the request using the content in the
 // provided. The main benefit of ServeContent over io.Copy
 // is that it handles Range requests properly, sets the MIME type, and

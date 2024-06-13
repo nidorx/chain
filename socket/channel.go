@@ -2,11 +2,12 @@ package socket
 
 import (
 	"fmt"
+	"log/slog"
+	"sync"
+
 	"github.com/nidorx/chain"
 	"github.com/nidorx/chain/pkg"
 	"github.com/nidorx/chain/pubsub"
-	"github.com/rs/zerolog/log"
-	"sync"
 )
 
 // LeaveReason reasons why a LeaveHandler is invoked
@@ -82,9 +83,7 @@ func (c *Channel) Join(topic string, handler JoinHandler) {
 		c.joinHandlers = &pkg.WildcardStore[JoinHandler]{}
 	}
 	if err := c.joinHandlers.Insert(topic, handler); err != nil {
-		log.Panic().Err(err).Caller(1).
-			Str("topic", topic).
-			Msg(_l("invalid join handler for topic"))
+		panic(fmt.Sprintf("[chain.socket] invalid join handler for topic. Topic: %s, Error: %s", topic, err.Error()))
 	}
 	return
 }
@@ -103,9 +102,7 @@ func (c *Channel) HandleIn(event string, handler InHandler) {
 		c.inHandlers = &pkg.WildcardStore[InHandler]{}
 	}
 	if err := c.inHandlers.Insert(event, handler); err != nil {
-		log.Panic().Err(err).Caller(1).
-			Str("event", event).
-			Msg(_l("invalid InHandler for event"))
+		panic(fmt.Sprintf("[chain.socket] invalid InHandler for event. Event: %s, Error: %s", event, err.Error()))
 	}
 }
 
@@ -132,9 +129,7 @@ func (c *Channel) HandleOut(event string, handler OutHandler) {
 		c.outHandlers = &pkg.WildcardStore[OutHandler]{}
 	}
 	if err := c.outHandlers.Insert(event, handler); err != nil {
-		log.Panic().Err(err).Caller(1).
-			Str("event", event).
-			Msg(_l("invalid OutHandler for event"))
+		panic(fmt.Sprintf("[chain] invalid OutHandler for event. Event: %s, Error: %s", event, err.Error()))
 	}
 }
 
@@ -144,9 +139,7 @@ func (c *Channel) Leave(topic string, handler LeaveHandler) {
 		c.leaveHandlers = &pkg.WildcardStore[LeaveHandler]{}
 	}
 	if err := c.leaveHandlers.Insert(topic, handler); err != nil {
-		log.Panic().Err(err).Caller(1).
-			Str("topic", topic).
-			Msg(_l("invalid LeaveHandler for topic"))
+		panic(fmt.Sprintf("[chain] invalid LeaveHandler for topic. Topic: %s, Error: %s", topic, err.Error()))
 	}
 }
 
@@ -181,10 +174,12 @@ func (c *Channel) Dispatch(topic string, msg any, from string) {
 		isByteArray = true
 		message = newMessageAny()
 		if _, err := c.serializer.Decode(payload, message); err != nil {
-			log.Debug().Err(err).Caller(1).
-				Bytes("payload", payload).
-				Str("topic", topic).
-				Msg(_l("could not decode serialized data"))
+			slog.Debug(
+				"[chain.socket] could not decode serialized data",
+				slog.Any("Error", err),
+				slog.Any("Payload", payload),
+				slog.String("Topic", topic),
+			)
 
 			deleteMessage(message)
 			return

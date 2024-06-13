@@ -2,76 +2,85 @@ package chain
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 )
 
-// AlreadySentError Error raised when trying to modify or send an already sent response
-var AlreadySentError = errors.New("the response was already sent")
+// ErrAlreadySent Error raised when trying to modify or send an already sent response
+var ErrAlreadySent = errors.New("the response was already sent")
 
 type ResponseWriterSpy struct {
 	http.ResponseWriter
-	wrote           bool
-	writeCalled     bool
-	hooksBeforeSend []func()
-	hooksAfterSend  []func()
+	writeStarted           bool
+	writeCalled            bool
+	writeHeaderCalled      bool
+	beforeWriteHeaderHooks []func()
+	afterWriteHooks        []func()
 }
 
 func (w *ResponseWriterSpy) WriteHeader(status int) {
-	w.runBeforeHook()
+	w.writeHeaderCalled = true
+	w.execBeforeWriteHeaderHooks()
 	w.ResponseWriter.WriteHeader(status)
-	if !w.writeCalled {
-		w.runAfterHook()
-	}
 }
 
 func (w *ResponseWriterSpy) Write(b []byte) (int, error) {
 	w.writeCalled = true
-	w.runBeforeHook()
-	i, err := w.ResponseWriter.Write(b)
-	w.runAfterHook()
-	return i, err
+	if !w.writeStarted {
+		w.execBeforeWriteHeaderHooks()
+	}
+	return w.ResponseWriter.Write(b)
 }
 
-// beforeSend Registers a callback to be invoked before the response is sent.
+// beforeWriteHeader Registers a callback to be invoked before the response is sent.
 //
 // Callbacks are invoked in the reverse order they are defined (callbacks defined first are invoked last).
-func (w *ResponseWriterSpy) beforeSend(callback func()) error {
-	if w.wrote {
-		return AlreadySentError
+func (w *ResponseWriterSpy) beforeWriteHeader(callback func()) error {
+	if w.writeStarted {
+		return ErrAlreadySent
 	}
-	w.hooksBeforeSend = append(w.hooksBeforeSend, callback)
+	w.beforeWriteHeaderHooks = append(w.beforeWriteHeaderHooks, callback)
 	return nil
 }
 
-// beforeSend Registers a callback to be invoked before the response is sent.
+// afterWrite Registers a callback to be invoked before the response is sent.
 //
 // Callbacks are invoked in the reverse order they are defined (callbacks defined first are invoked last).
-func (w *ResponseWriterSpy) afterSend(callback func()) error {
-	if w.wrote {
-		return AlreadySentError
+func (w *ResponseWriterSpy) afterWrite(callback func()) error {
+	if w.writeStarted {
+		return ErrAlreadySent
 	}
-	w.hooksAfterSend = append(w.hooksAfterSend, callback)
+	w.afterWriteHooks = append(w.afterWriteHooks, func() {
+		defer func() {
+			// no panic
+			if r := recover(); r != nil {
+				slog.Warn("[chain] panic occured in a after write hook", slog.Any("panic", r))
+			}
+		}()
+		callback()
+	})
 	return nil
 }
 
-func (w *ResponseWriterSpy) runBeforeHook() {
-	if w.wrote {
+func (w *ResponseWriterSpy) execBeforeWriteHeaderHooks() {
+	if w.writeStarted {
 		return
 	}
-	w.wrote = true
-	if w.hooksBeforeSend != nil {
-		for i := len(w.hooksBeforeSend) - 1; i >= 0; i-- {
-			w.hooksBeforeSend[i]()
+	w.writeStarted = true
+	if w.beforeWriteHeaderHooks != nil {
+		for i := len(w.beforeWriteHeaderHooks) - 1; i >= 0; i-- {
+			w.beforeWriteHeaderHooks[i]()
 		}
 	}
-	w.hooksBeforeSend = nil
+	w.beforeWriteHeaderHooks = nil
 }
 
-func (w *ResponseWriterSpy) runAfterHook() {
-	if w.hooksAfterSend != nil {
-		for i := len(w.hooksAfterSend) - 1; i >= 0; i-- {
-			w.hooksAfterSend[i]()
+// execAfterWriteHooksCalledByRouter called by router.ServeHTTP
+func (w *ResponseWriterSpy) execAfterWriteHooksCalledByRouter() {
+	if w.afterWriteHooks != nil {
+		for i := len(w.afterWriteHooks) - 1; i >= 0; i-- {
+			w.afterWriteHooks[i]()
 		}
 	}
-	w.hooksAfterSend = nil
+	w.afterWriteHooks = nil
 }

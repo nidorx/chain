@@ -35,20 +35,10 @@ type Context struct {
 	MatchedRoutePath  string
 	Writer            http.ResponseWriter
 	Request           *http.Request
-	Crypto            *cryptoShortcuts
+	Crypto            *cryptoImpl
 	root              *Context
 	children          []*Context
 }
-
-// async(runnable)                       // lifts request out of Jetty's ThreadPool, and moves it to Javalin's AsyncThreadPool
-// async(asyncConfig, runnable)          // same as above, but with additonal config
-// handlerType()                         // handler type of the current handler (BEFORE, AFTER, GET, etc)
-// appData(typedKey)                     // get data from the Javalin instance (see app data section below)
-// with(pluginClass)                     // get context plugin by class, see plugin section below
-// matchedPath()                         // get the path that was used to match this request (ex, "/hello/{name}")
-// endpointHandlerPath()                 // get the path of the endpoint handler that was used to match this request
-// cookieStore()                         // see cookie store section below
-// skipRemainingHandlers()               // skip all remaining handlers for this request
 
 // Set define um valor compartilhado no contexto de execução da requisição
 func (ctx *Context) Set(key any, value any) {
@@ -62,34 +52,16 @@ func (ctx *Context) Set(key any, value any) {
 }
 
 // Get obtém um valor compartilhado no contexto de execução da requisição
-func (ctx *Context) Get(key any) any {
+func (ctx *Context) Get(key any) (any, bool) {
 	if ctx.root != nil {
 		return ctx.root.Get(key)
 	}
 
 	if ctx.data == nil {
-		return nil
+		return nil, false
 	}
-	if value, exists := ctx.data[key]; exists {
-		return value
-	}
-	return nil
-}
-
-// GetParam returns the value of the first Param which key matches the given name.
-// If no matching Param is found, an empty string is returned.
-func (ctx *Context) GetParam(name string) string {
-	for i := 0; i < ctx.paramCount; i++ {
-		if ctx.paramNames[i] == name {
-			return ctx.paramValues[i]
-		}
-	}
-	return ""
-}
-
-// GetParamByIndex get one parameter per index
-func (ctx *Context) GetParamByIndex(index int) string {
-	return ctx.paramValues[index]
+	value, exists := ctx.data[key]
+	return value, exists
 }
 
 func (ctx *Context) WithParams(names []string, values []string) *Context {
@@ -145,21 +117,21 @@ func (ctx *Context) Router() *Router {
 // Callbacks are invoked in the reverse order they are defined (callbacks defined first are invoked last).
 func (ctx *Context) BeforeSend(callback func()) error {
 	if spy, is := ctx.Writer.(*ResponseWriterSpy); is {
-		return spy.beforeSend(callback)
+		return spy.beforeWriteHeader(callback)
 	}
 	return nil
 }
 
 func (ctx *Context) AfterSend(callback func()) error {
 	if spy, is := ctx.Writer.(*ResponseWriterSpy); is {
-		return spy.afterSend(callback)
+		return spy.afterWrite(callback)
 	}
 	return nil
 }
 
 func (ctx *Context) write() {
 	if spy, is := ctx.Writer.(*ResponseWriterSpy); is {
-		if !spy.wrote {
+		if !spy.writeStarted {
 			ctx.WriteHeader(http.StatusOK)
 		}
 	}

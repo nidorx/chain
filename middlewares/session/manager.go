@@ -2,19 +2,16 @@ package session
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/nidorx/chain"
-	"github.com/rs/zerolog/log"
 )
 
 var globalManagers = map[*chain.Router]*Manager{}
-
-func _l(msg string) string {
-	return "[chain.middlewares.session] " + msg
-}
 
 var (
 	sessionKey     = "syntax.chain.session."         // Session on chain.Context
@@ -32,23 +29,21 @@ func (m *Manager) Init(method string, path string, router *chain.Router) {
 
 	if m.Store == nil {
 		m.Store = &Cookie{}
-		log.Panic().Msg(_l("store is required"))
+		panic(fmt.Sprintf("[chain.middlewares.session] store is required. Method: %s, Path: %s", method, path))
 	}
 	if strings.TrimSpace(m.Key) == "" {
-		log.Panic().Msg(_l("Key is required"))
+		panic(fmt.Sprintf("[chain.middlewares.session] key is required. Method: %s, Path: %s", method, path))
 	}
 
 	if (method == "" || method == "*") && (path == "" || path == "*" || path == "/*") {
 		if _, exist := globalManagers[router]; exist {
-			log.Panic().Msg(_l("there is already a global session.Manager registered for this chain.Router"))
+			panic(fmt.Sprintf("[chain.middlewares.session] there is already a global session.Manager registered for this chain.Router. Method: %s, Path: %s", method, path))
 		}
 		globalManagers[router] = m
 	}
 
 	if err := m.Store.Init(m.Config, router); err != nil {
-		log.Panic().
-			Str("store", m.Store.Name()).
-			Msg(_l("error initializing store"))
+		panic(fmt.Sprintf("[chain.middlewares.session] error initializing store. store: %s", m.Store.Name()))
 	}
 }
 
@@ -84,9 +79,11 @@ func (m *Manager) beforeSend(ctx *chain.Context, sid string, session *Session) {
 	case write:
 		rawCookie, err := m.Store.Put(ctx, sid, session.data)
 		if err != nil {
-			log.Error().Err(err).Caller(1).
-				Str("store", m.Store.Name()).
-				Msg(_l("error saving session in store"))
+			slog.Error(
+				"[chain.middlewares.session] error saving session in store",
+				slog.Any("Error", err),
+				slog.String("Store", m.Store.Name()),
+			)
 		} else {
 			m.setCookie(ctx, rawCookie)
 		}
@@ -101,9 +98,11 @@ func (m *Manager) beforeSend(ctx *chain.Context, sid string, session *Session) {
 		}
 		rawCookie, err := m.Store.Put(ctx, "", session.data)
 		if err != nil {
-			log.Error().Err(err).Caller(1).
-				Str("store", m.Store.Name()).
-				Msg(_l("error saving session in store"))
+			slog.Error(
+				"[chain.middlewares.session] error saving session in store",
+				slog.Any("Error", err),
+				slog.String("Store", m.Store.Name()),
+			)
 		} else {
 			m.setCookie(ctx, rawCookie)
 		}
@@ -129,13 +128,13 @@ func (m *Manager) setCookie(ctx *chain.Context, rawCookie string) {
 
 // FetchByKey LazyLoad session from context using a session.Manager Key
 func FetchByKey(ctx *chain.Context, key string) (*Session, error) {
-	if value := ctx.Get(sessionKey + key); value != nil {
+	if value, exist := ctx.Get(sessionKey + key); exist && value != nil {
 		if session, valid := value.(*Session); valid {
 			return session, nil
 		}
 	}
 
-	if value := ctx.Get(managerKey + key); value != nil {
+	if value, exist := ctx.Get(managerKey + key); exist && value != nil {
 		if manager, valid := value.(*Manager); valid {
 			return manager.fetch(ctx)
 		}

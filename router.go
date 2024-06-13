@@ -6,13 +6,13 @@ package chain
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 
 	"github.com/nidorx/chain/pkg"
-	"github.com/rs/zerolog/log"
 )
 
 // Router is a high-performance router.
@@ -21,16 +21,24 @@ type Router struct {
 
 	contextPool sync.Pool
 
-	Crypto cryptoShortcuts
+	Crypto cryptoImpl
+
+	// ConnContext optionally specifies a function that modifies
+	// the context used for a new connection c. The provided ctx
+	// is derived from the base context and has a ServerContextKey
+	// value.
+	// ConnContext func(ctx context.Context, c net.Conn) context.Context
+
+	// ReqContext optionally specifies a function that modifies
+	// the context used for the request.
+	ReqContext func(*Context) context.Context
 
 	// Cached value of global (*) getAllowedHeader methods
 	globalAllowed string
 
-	// Enables automatic redirection if the current route can't be matched but a handler for the path with (without)
-	// the trailing slash exists.
-	// For example if /foo/ is requested but a route only exists for /foo, the client is redirected to /foo with http
-	// status code 301 for GET requests and 308 for all other request methods.
-	RedirectTrailingSlash bool
+	// If enabled, the router automatically replies to OPTIONS requests.
+	// Custom OPTIONS handlers take priority over automatic replies.
+	HandleOPTIONS bool
 
 	// If enabled, the router tries to fix the current request path, if no handle is registered for it.
 	// First superfluous path elements like ../ or // are removed.
@@ -41,9 +49,11 @@ type Router struct {
 	// RedirectTrailingSlash is independent of this option.
 	RedirectFixedPath bool
 
-	// If enabled, the router automatically replies to OPTIONS requests.
-	// Custom OPTIONS handlers take priority over automatic replies.
-	HandleOPTIONS bool
+	// Enables automatic redirection if the current route can't be matched but a handler for the path with (without)
+	// the trailing slash exists.
+	// For example if /foo/ is requested but a route only exists for /foo, the client is redirected to /foo with http
+	// status code 301 for GET requests and 308 for all other request methods.
+	RedirectTrailingSlash bool
 
 	// If enabled, the router checks if another method is allowed for the current route, if the current request can not
 	// be routed.
@@ -51,28 +61,28 @@ type Router struct {
 	// If no other Method is allowed, the request is delegated to the NotFoundHandler handler.
 	HandleMethodNotAllowed bool
 
+	// Function to handle panics recovered from http handlers.
+	// It should be used to generate a error page and return the http error code 500 (Internal Server Error).
+	// The handler can be used to keep your server from crashing because of unrecovered panics.
+	PanicHandler func(http.ResponseWriter, *http.Request, any)
+
+	// Function to handle errors recovered from http handlers and middlewares.
+	// The handler can be used to do global error handling (not handled in middlewares)
+	ErrorHandler func(*Context, error)
+
 	// Configurable http.Handler function which is called when no matching route is found. If it is not set, http.NotFound is
 	// used.
 	NotFoundHandler http.Handler
-
-	// Configurable http.Handler function which is called when a request cannot be routed and HandleMethodNotAllowed is true.
-	// If it is not set, http.Error with http.StatusMethodNotAllowed is used.
-	// The "Allow" header with allowed request methods is set before the handler is called.
-	MethodNotAllowedHandler http.Handler
 
 	// An optional http.Handler function that is called on automatic OPTIONS requests.
 	// The handler is only called if HandleOPTIONS is true and no OPTIONS handler for the specific path was set.
 	// The "Allowed" header is set before calling the handler.
 	GlobalOPTIONSHandler http.Handler
 
-	// Function to handle errors recovered from http handlers and middlewares.
-	// The handler can be used to do global error handling (not handled in middlewares)
-	ErrorHandler func(*Context, error)
-
-	// Function to handle panics recovered from http handlers.
-	// It should be used to generate a error page and return the http error code 500 (Internal Server Error).
-	// The handler can be used to keep your server from crashing because of unrecovered panics.
-	PanicHandler func(http.ResponseWriter, *http.Request, any)
+	// Configurable http.Handler function which is called when a request cannot be routed and HandleMethodNotAllowed is true.
+	// If it is not set, http.Error with http.StatusMethodNotAllowed is used.
+	// The "Allow" header with allowed request methods is set before the handler is called.
+	MethodNotAllowedHandler http.Handler
 }
 
 func (r *Router) Group(route string) Group {
@@ -156,47 +166,50 @@ func (r *Router) Handle(method string, route string, handle any) error {
 		r.globalAllowed = r.getAllowedHeader("*", "", nil)
 	}
 
-	if handler, valid := handle.(Handle); valid {
-		registry.addHandle(route, handler)
-	} else if handler, valid := handle.(func(*Context) error); valid {
-		registry.addHandle(route, handler)
-	} else if handler, valid := handle.(func(*Context)); valid {
-		registry.addHandle(route, func(ctx *Context) error {
-			handler(ctx)
-			return nil
-		})
-	} else if handler, valid := handle.(http.Handler); valid {
-		registry.addHandle(route, func(ctx *Context) error {
-			reqCtx := ctx.Request.Context()
-			reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
-			handler.ServeHTTP(ctx.Writer, ctx.Request.WithContext(reqCtx))
-			return nil
-		})
-	} else if handler, valid := handle.(http.HandlerFunc); valid {
-		registry.addHandle(route, func(ctx *Context) error {
-			reqCtx := ctx.Request.Context()
-			reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
-			handler.ServeHTTP(ctx.Writer, ctx.Request.WithContext(reqCtx))
-			return nil
-		})
-	} else if handler, valid := handle.(func(w http.ResponseWriter, r *http.Request)); valid {
-		registry.addHandle(route, func(ctx *Context) error {
-			reqCtx := ctx.Request.Context()
-			reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
-			handler(ctx.Writer, ctx.Request.WithContext(reqCtx))
-			return nil
-		})
-	} else if handler, valid := handle.(func(w http.ResponseWriter, r *http.Request) error); valid {
-		registry.addHandle(route, func(ctx *Context) error {
-			reqCtx := ctx.Request.Context()
-			reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
-			return handler(ctx.Writer, ctx.Request.WithContext(reqCtx))
-		})
+	if handler, err := Handler(handle); err != nil {
+		return err
 	} else {
-		return ErrInvalidHandler
+		registry.addHandle(route, handler)
 	}
 
 	return nil
+}
+
+// Handle registers a new Route for the given method and path.
+func Handler(handle any) (h Handle, err error) {
+	if handler, valid := handle.(Handle); valid {
+		h = handler
+	} else if handler, valid := handle.(func(*Context) error); valid {
+		h = handler
+	} else if handler, valid := handle.(func(*Context)); valid {
+		h = func(ctx *Context) error {
+			handler(ctx)
+			return nil
+		}
+	} else if handler, valid := handle.(http.Handler); valid {
+		h = func(ctx *Context) error {
+			handler.ServeHTTP(ctx.Writer, ctx.Request)
+			return nil
+		}
+	} else if handler, valid := handle.(http.HandlerFunc); valid {
+		h = func(ctx *Context) error {
+			handler.ServeHTTP(ctx.Writer, ctx.Request)
+			return nil
+		}
+	} else if handler, valid := handle.(func(w http.ResponseWriter, r *http.Request)); valid {
+		h = func(ctx *Context) error {
+			handler(ctx.Writer, ctx.Request)
+			return nil
+		}
+	} else if handler, valid := handle.(func(w http.ResponseWriter, r *http.Request) error); valid {
+		h = func(ctx *Context) error {
+			return handler(ctx.Writer, ctx.Request)
+		}
+	} else {
+		err = ErrInvalidHandler
+	}
+
+	return
 }
 
 // Use registers a middleware routeT that will match requests with the provided prefix (which is optional and defaults to "/*").
@@ -286,15 +299,13 @@ func (r *Router) Use(args ...any) Group {
 			middlewares = append(middlewares, func(ctx *Context, next func() error) error {
 				spy := &ResponseWriterSpy{ResponseWriter: ctx.Writer}
 				handler.ServeHTTP(spy, ctx.Request)
-				if spy.wrote {
+				if spy.writeStarted {
 					return nil
 				}
 				return next()
 			})
 		default:
-			log.Panic().
-				Str("middleware", reflect.TypeOf(arg).String()).
-				Msg(_l("invalid middleware"))
+			panic(fmt.Sprintf("[chain] invalid middleware. middleware: %s", reflect.TypeOf(arg).String()))
 		}
 	}
 
@@ -349,19 +360,49 @@ func (r *Router) Lookup(method string, path string) (*Route, *Context) {
 	return nil, nil
 }
 
+func (r *Router) updateContext(ctx *Context) *http.Request {
+	req := ctx.Request
+
+	// add chain.Context
+	reqCtx := ctx.Request.Context()
+	reqCtx = context.WithValue(reqCtx, ContextKey, ctx)
+	req = req.WithContext(reqCtx)
+	ctx.Request = req
+
+	// add custom context
+	if rc := r.ReqContext; rc != nil {
+		if reqCtx := rc(ctx); reqCtx != nil {
+			req = req.WithContext(reqCtx)
+			ctx.Request = req
+		}
+	}
+	return req
+}
+
 // ServeHTTP responds to the given request.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
-	w = &ResponseWriterSpy{ResponseWriter: w}
-
-	defer r.panicRecover(w, req)
-
-	ctx := r.GetContext(req, w, "")
+	rw := &ResponseWriterSpy{ResponseWriter: w}
+	w = rw
+	var ctx *Context
 
 	defer func() {
-		// if necessary, write header on exit
-		ctx.write()
+		if rcv := recover(); rcv != any(nil) {
+			if r.PanicHandler != nil {
+				r.PanicHandler(w, req, rcv)
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		} else if !rw.writeStarted && ctx != nil {
+			// if necessary, write header on exit
+			ctx.write()
+		}
+
+		// execute after write hooks
+		rw.execAfterWriteHooksCalledByRouter()
 	}()
+
+	ctx = r.GetContext(req, w, "")
 
 	go func() {
 		// clear context when connection is closed
@@ -374,6 +415,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if registry := r.registries[req.Method]; registry != nil {
 		if route := registry.findHandle(ctx); route != nil {
 			ctx.MatchedRoutePath = route.Path.path
+			r.updateContext(ctx)
 			if err := route.Dispatch(ctx); err != nil {
 				if r.ErrorHandler != nil {
 					r.ErrorHandler(ctx, err)
@@ -434,6 +476,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	req = r.updateContext(ctx)
 	if req.Method == http.MethodOptions && r.HandleOPTIONS {
 		// Handle OPTIONS requests
 		if allow := r.getAllowedHeader(path, http.MethodOptions, ctx); allow != "" {
@@ -494,16 +537,6 @@ func (r *Router) PutContext(ctx *Context) {
 	ctx.data = nil
 	ctx.root = nil
 	r.contextPool.Put(ctx)
-}
-
-func (r *Router) panicRecover(w http.ResponseWriter, req *http.Request) {
-	if rcv := recover(); rcv != any(nil) {
-		if r.PanicHandler != nil {
-			r.PanicHandler(w, req, rcv)
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-	}
 }
 
 func (r *Router) getAllowedHeader(path string, reqMethod string, ctx *Context) (allow string) {

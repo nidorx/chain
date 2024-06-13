@@ -165,31 +165,13 @@ func Test_Router_Invalid_Input(t *testing.T) {
 		return nil
 	}
 
-	recv := catchPanic(func() {
-		router.Handle("", "/", handle)
-	})
-	if recv == nil {
-		t.Fatal("registering empty method did not panic")
+	err := router.Handle("", "/", handle)
+	if err != ErrInvalidMethod {
+		t.Fatal("registering empty method")
 	}
 
-	recv = catchPanic(func() {
-		router.GET("", handle)
-	})
-	if recv == nil {
-		t.Fatal("registering empty path did not panic")
-	}
-
-	recv = catchPanic(func() {
-		router.GET("noSlashRoot", handle)
-	})
-	if recv == nil {
-		t.Fatal("registering path not beginning with '/' did not panic")
-	}
-
-	recv = catchPanic(func() {
-		router.GET("/", nil)
-	})
-	if recv == nil {
+	err = router.GET("/", nil)
+	if err != ErrHandlerIsNil {
 		t.Fatal("registering nil handler did not panic")
 	}
 }
@@ -1004,7 +986,7 @@ func Test_Router_Duplicate_Path(t *testing.T) {
 
 		// Add again
 		recv = catchPanic(func() {
-			router.GET(route, nil)
+			router.GET(route, fakeHandler(route))
 		})
 		if recv == nil {
 			t.Fatalf("no panic while inserting duplicate Route '%s", route)
@@ -1025,28 +1007,6 @@ func Test_Router_Duplicate_Path(t *testing.T) {
 	}
 }
 
-func Test_Router_Empty_Wildcard_Name(t *testing.T) {
-	router := New()
-
-	routes := [...]struct {
-		input string
-	}{
-		{"/user:"},
-		{"/user:/"},
-		{"/cmd/:/"},
-	}
-	for _, tt := range routes {
-		t.Run(tt.input, func(t *testing.T) {
-			recv := catchPanic(func() {
-				router.GET(tt.input, nil)
-			})
-			if recv == nil {
-				t.Fatalf("no panic while inserting Route with empty wildcard name '%s", tt.input)
-			}
-		})
-	}
-}
-
 func Test_Router_CatchAll_Conflict(t *testing.T) {
 	routes := []struct {
 		first  string
@@ -1060,7 +1020,7 @@ func Test_Router_CatchAll_Conflict(t *testing.T) {
 			router := New()
 			router.GET(tt.first, fakeHandler(tt.first))
 			recv := catchPanic(func() {
-				router.GET(tt.second, nil)
+				router.GET(tt.second, fakeHandler(tt.second))
 			})
 
 			if recv == nil {

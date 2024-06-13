@@ -3,12 +3,13 @@ package socket
 import (
 	"bytes"
 	"embed"
-	"github.com/nidorx/chain"
-	"github.com/rs/zerolog/log"
+	"fmt"
 	"net/http"
 	"path"
 	"strconv"
 	"time"
+
+	"github.com/nidorx/chain"
 )
 
 var (
@@ -22,7 +23,7 @@ var (
 
 func init() {
 	if content, err := clientJsFS.ReadFile("client/chain.js"); err != nil {
-		log.Panic().Err(err).Caller(1).Stack().Msg(_l("cannot load client/chain.js"))
+		panic(fmt.Sprintf("[chain] cannot load client/chain.js. Error: %s", err.Error()))
 	} else {
 		clientJsContent = content
 		clientJsEtag = chain.HashCrc32(clientJsContent)
