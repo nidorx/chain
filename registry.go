@@ -1,7 +1,7 @@
 package chain
 
 import (
-	"github.com/rs/zerolog/log"
+	"log/slog"
 	"strings"
 )
 
@@ -55,10 +55,8 @@ func (r *Registry) addHandle(path string, handle Handle) {
 	// avoid conflicts
 	for _, route := range r.routes {
 		if details.conflictsWith(route.Path) {
-			log.Panic().
-				Str("new", details.path).
-				Str("existing", route.Path.path).
-				Msg(_l("wildcard conflicts"))
+			slog.Error("[chain] wildcard conflicts", slog.String("new", details.path), slog.String("existing", route.Path.path))
+			panic("[chain] wildcard conflicts")
 		}
 	}
 

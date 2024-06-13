@@ -1,15 +1,13 @@
 package socket
 
 import (
+	"fmt"
+	"log/slog"
+	"sync"
+
 	"github.com/nidorx/chain"
 	"github.com/nidorx/chain/pkg"
-	"github.com/rs/zerolog/log"
-	"sync"
 )
-
-func _l(msg string) string {
-	return "[chain.socket] " + msg
-}
 
 var (
 	defaultSerializer = &MessageSerializer{}
@@ -52,16 +50,14 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 
 	if h.OnConfig != nil {
 		if err := h.OnConfig(h, router, endpoint); err != nil {
-			log.Panic().Stack().Err(err).Caller(1).
-				Msg(_l("socket handler config error"))
+			panic(fmt.Sprintf("[chain.socket] socket handler config error. Error: %s", err.Error()))
 		}
 	}
 
 	h.sessions = map[string]*Session{}
 
 	if len(h.Channels) == 0 {
-		log.Panic().Caller(1).
-			Msg(_l("is necessary to inform the channels of this socket"))
+		panic(fmt.Sprintf("[chain.socket] is necessary to inform the channels of this socket. Endpoint: %s", endpoint))
 	}
 
 	if h.Serializer == nil {
@@ -72,9 +68,7 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 
 	for _, channel := range h.Channels {
 		if err := h.channels.Insert(channel.TopicPattern, channel); err != nil {
-			log.Panic().Stack().Err(err).Caller(1).
-				Str("TopicPattern", channel.TopicPattern).
-				Msg(_l("invalid channel for topic"))
+			panic(fmt.Sprintf("[chain.socket] invalid channel for topic. TopicPattern: %s, Error: %s", channel.TopicPattern, err.Error()))
 		}
 		channel.serializer = h.Serializer
 	}
@@ -140,9 +134,11 @@ func (h *Handler) Dispatch(payload []byte, session *Session) {
 
 		message := newMessageAny()
 		if _, err := h.Serializer.Decode(payload, message); err != nil {
-			log.Debug().Err(err).Caller(1).
-				Bytes("payload", payload).
-				Msg(_l("could not decode serialized data"))
+			slog.Debug(
+				"[chain.socket] could not decode serialized data",
+				slog.Any("Error", err),
+				slog.Any("Payload", payload),
+			)
 
 			deleteMessage(message)
 			return
@@ -166,20 +162,22 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 	topic := message.Topic
 	channel := h.getChannel(topic)
 	if channel == nil {
-		log.Info().Caller(1).
-			Str("topic", topic).
-			Str("socket_id", session.SocketId()).
-			Msg(_l("ignoring unmatched topic"))
+		slog.Info(
+			"[chain.socket] ignoring unmatched topic",
+			slog.Any("socket_id", session.SocketId()),
+			slog.String("Topic", topic),
+		)
 
 		h.pushIgnore(message, session, ErrUnmatchedTopic)
 		return
 	}
 	socket := session.GetSocket(topic)
 	if socket != nil {
-		log.Info().
-			Str("topic", topic).
-			Str("socket_id", session.SocketId()).
-			Msg(_l("duplicate channel join. closing existing channel for new join"))
+		slog.Info(
+			"[chain.socket] duplicate channel join. closing existing channel for new join",
+			slog.Any("socket_id", session.SocketId()),
+			slog.String("Topic", topic),
+		)
 
 		// remove from transport
 		session.deleteSocket(topic)
@@ -251,10 +249,11 @@ func (h *Handler) handleMessage(message *Message, session *Session) {
 	topic := message.Topic
 	socket := session.GetSocket(topic)
 	if socket == nil {
-		log.Info().
-			Str("topics", topic).
-			Str("socket_id", session.SocketId()).
-			Msg(_l("ignoring unmatched topic"))
+		slog.Info(
+			"[chain.socket] ignoring unmatched topic",
+			slog.Any("socket_id", session.SocketId()),
+			slog.String("Topic", topic),
+		)
 
 		h.pushIgnore(message, session, ErrUnmatchedTopic)
 		return
@@ -306,15 +305,17 @@ func (h *Handler) push(reply *Message, info *Session) {
 	var bytes []byte
 	var err error
 	if bytes, err = h.Serializer.Encode(reply); err != nil {
-		log.Debug().Err(err).Caller(1).
-			Int("msg.Kind", int(reply.Kind)).
-			Int("msg.JoinRef", reply.JoinRef).
-			Int("msg.Ref", reply.Ref).
-			Int("msg.Status", reply.Status).
-			Str("msg.Topic", reply.Topic).
-			Str("msg.Event", reply.Event).
-			Interface("msg.Payload", reply.Payload).
-			Msg(_l("could not encode message"))
+		slog.Debug(
+			"[chain.socket] could not encode message",
+			slog.Any("Error", err),
+			slog.Int("Kind", int(reply.Kind)),
+			slog.Int("JoinRef", reply.JoinRef),
+			slog.Int("Ref", reply.Ref),
+			slog.Int("Status", reply.Status),
+			slog.String("Topic", reply.Topic),
+			slog.String("Event", reply.Event),
+			slog.Any("Payload", reply.Payload),
+		)
 		return
 	}
 	info.Push(bytes)

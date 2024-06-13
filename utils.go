@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"hash/crc32"
+
+	"github.com/cespare/xxhash/v2"
+	"github.com/segmentio/ksuid"
 )
 
 type Serializer interface {
@@ -40,4 +43,17 @@ func HashCrc32(content []byte) string {
 	h := crc32.New(crc32iSCSI)
 	h.Write(content)
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+// Xxh64 return a base64-encoded checksum of a resource using Xxh64 algorithm
+//
+// Encoded using Base64 URLSafe
+func HashXxh64(content []byte) string {
+	h := xxhash.New()
+	h.Write(content)
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
+func NewUID() (uid string) {
+	return ksuid.New().String()
 }

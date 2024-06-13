@@ -1,8 +1,9 @@
 package chain
 
 import (
+	"log/slog"
+
 	"github.com/nidorx/chain/crypto"
-	"github.com/rs/zerolog/log"
 )
 
 // NewKeyring starts a Keyring that will be updated whenever SecretKeySync() is invoked
@@ -27,7 +28,7 @@ func NewKeyring(salt string, iterations int, length int, digest string) *crypto.
 	SecretKeySync(func(secretKeyBase string) {
 		key := crypt.KeyGenerate([]byte(secretKeyBase), []byte(salt), iterations, length, digest)
 		if err := k.AddKey(key); err != nil {
-			log.Error().Err(err).Msg(_l("[chain.keyring] error deriving key from SecretKeyBase"))
+			slog.Error("[chain.keyring] error deriving key from SecretKeyBase", slog.Any("error", err))
 			return
 		}
 	})

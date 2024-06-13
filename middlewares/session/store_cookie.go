@@ -22,10 +22,11 @@
 package session
 
 import (
+	"log/slog"
+	"strings"
+
 	"github.com/nidorx/chain"
 	"github.com/nidorx/chain/crypto"
-	"github.com/rs/zerolog/log"
-	"strings"
 )
 
 var (
@@ -89,9 +90,11 @@ func (c *Cookie) Get(ctx *chain.Context, rawCookie string) (sid string, data map
 		}
 	}
 
-	log.Debug().Err(err).Caller(1).
-		Str("store", c.Name()).
-		Msg(_l("could not decode serialized data"))
+	slog.Debug(
+		"[chain.middlewares.session] could not decode serialized data",
+		slog.Any("Error", err),
+		slog.Any("Store", c.Name()),
+	)
 	return
 }
 
