@@ -3,7 +3,6 @@ package chain
 import (
 	"context"
 	"net/http"
-	"strings"
 )
 
 type chainContextKey struct{}
@@ -32,19 +31,17 @@ type Context struct {
 	data              map[any]any
 	handler           Handle
 	router            *Router
-	MatchedRoutePath  string
+	Route             *RouteInfo
 	Writer            http.ResponseWriter
 	Request           *http.Request
 	Crypto            *cryptoImpl
-	root              *Context
+	parent            *Context
+	index             int
 	children          []*Context
 }
 
 // Set define um valor compartilhado no contexto de execução da requisição
 func (ctx *Context) Set(key any, value any) {
-	if ctx.root != nil {
-		ctx.root.Set(key, value)
-	}
 	if ctx.data == nil {
 		ctx.data = make(map[any]any)
 	}
@@ -53,46 +50,86 @@ func (ctx *Context) Set(key any, value any) {
 
 // Get obtém um valor compartilhado no contexto de execução da requisição
 func (ctx *Context) Get(key any) (any, bool) {
-	if ctx.root != nil {
-		return ctx.root.Get(key)
-	}
-
-	if ctx.data == nil {
-		return nil, false
-	}
-	value, exists := ctx.data[key]
-	return value, exists
-}
-
-func (ctx *Context) WithParams(names []string, values []string) *Context {
-	var child *Context
-	if ctx.router != nil {
-		child = ctx.router.GetContext(ctx.Request, ctx.Writer, "")
-	} else {
-		child = &Context{
-			Writer:      ctx.Writer,
-			Request:     ctx.Request,
-			handler:     ctx.handler,
-			paramCount:  len(names),
-			paramNames:  ctx.paramNames,
-			paramValues: ctx.paramValues,
+	if ctx.data != nil {
+		value, exists := ctx.data[key]
+		if exists {
+			return value, exists
 		}
 	}
+
+	if ctx.parent != nil {
+		return ctx.parent.Get(key)
+	}
+	return nil, false
+}
+
+func (ctx *Context) Destroy() {
+	if ctx.parent == nil {
+		// root context, will be removed automaticaly
+		return
+	}
+	if ctx.parent.children != nil {
+		ctx.parent.children[ctx.index] = nil
+	}
+	ctx.parent = nil
+	ctx.children = nil
+
+	if ctx.router != nil {
+		ctx.router.poolPutContext(ctx)
+	}
+}
+
+func (ctx *Context) Child() *Context {
+	var child *Context
+	if ctx.router != nil {
+		child = ctx.router.poolGetContext(ctx.Request, ctx.Writer, "")
+	} else {
+		child = &Context{
+			path:    ctx.path,
+			Crypto:  crypt,
+			Writer:  ctx.Writer,
+			Request: ctx.Request,
+			handler: ctx.handler,
+		}
+	}
+
+	child.paramCount = ctx.paramCount
+	child.paramNames = ctx.paramNames
+	child.paramValues = ctx.paramValues
+	child.pathSegments = ctx.pathSegments
+	child.pathSegmentsCount = ctx.pathSegmentsCount
+	child.Route = ctx.Route
+
+	child.parent = ctx
+
+	if ctx.children == nil {
+		ctx.children = make([]*Context, 0)
+	}
+	child.index = len(ctx.children)
+	ctx.children = append(ctx.children, child)
+
+	return child
+}
+
+// func (ctx *Context) With(key any, value any) *Context {
+
+// }
+
+func (ctx *Context) WithParams(names []string, values []string) *Context {
+	child := ctx.Child()
+	child.paramCount = len(names)
+	child.paramNames = [32]string{}
+	child.paramValues = [32]string{}
+
+	for i, name := range ctx.paramNames {
+		child.paramNames[i] = name
+		child.paramValues[i] = ctx.paramValues[i]
+	}
+
 	for i := 0; i < len(names); i++ {
 		child.paramNames[i] = names[i]
 		child.paramValues[i] = values[i]
 	}
-
-	if ctx.root == nil {
-		child.root = ctx
-	} else {
-		child.root = ctx.root
-	}
-
-	if child.root.children == nil {
-		child.root.children = make([]*Context, 0)
-	}
-	child.root.children = append(child.root.children, child)
 
 	return child
 }
@@ -145,30 +182,5 @@ func (ctx *Context) addParameter(name string, value string) {
 }
 
 func (ctx *Context) parsePathSegments() {
-	var (
-		segmentStart = 0
-		segmentSize  int
-		path         = ctx.path
-	)
-	if len(path) > 0 {
-		path = path[1:]
-	}
-
-	ctx.pathSegments[0] = 0
-	ctx.pathSegmentsCount = 1
-
-	for {
-		segmentSize = strings.IndexByte(path, separator)
-		if segmentSize == -1 {
-			segmentSize = len(path)
-		}
-		ctx.pathSegments[ctx.pathSegmentsCount] = segmentStart + 1 + segmentSize
-
-		if segmentSize == len(path) {
-			break
-		}
-		ctx.pathSegmentsCount++
-		path = path[segmentSize+1:]
-		segmentStart = segmentStart + 1 + segmentSize
-	}
+	ctx.pathSegmentsCount = parsePathSegments(ctx.path, &ctx.pathSegments)
 }

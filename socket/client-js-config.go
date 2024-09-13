@@ -5,7 +5,6 @@ import (
 	"embed"
 	"fmt"
 	"net/http"
-	"path"
 	"strconv"
 	"time"
 
@@ -33,12 +32,10 @@ func init() {
 // ClientJsHandler add "/chain.js" endpoint
 func ClientJsHandler(r *chain.Router, route string) {
 	if _, exist := configuredRouterClient[r]; exist {
-		// @TODO: Permitir saber quando a instancia é destruida r.OnDestroy(func() { })
 		return
 	}
 
-	jsPath := path.Join(route, "/chain.js")
-	r.GET(jsPath, func(ctx *chain.Context) {
+	r.GET("/chain.js", func(ctx *chain.Context) {
 		ctx.SetHeader("Content-Type", "text/javascript; charset=utf-8")
 		ctx.SetHeader("Content-Length", strconv.Itoa(len(clientJsContent)))
 		ctx.SetHeader("ETag", clientJsEtag)

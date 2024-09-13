@@ -14,8 +14,8 @@ import (
 var globalManagers = map[*chain.Router]*Manager{}
 
 var (
-	sessionKey     = "syntax.chain.session."         // Session on chain.Context
-	managerKey     = "syntax.chain.session-manager." // Manager on chain.Context
+	sessionKey     = "chain.session."         // Session on chain.Context
+	managerKey     = "chain.session-manager." // Manager on chain.Context
 	ErrCannotFetch = errors.New("cannot fetch session, check if there is a session.Manager configured")
 )
 

@@ -11,6 +11,7 @@ var ErrAlreadySent = errors.New("the response was already sent")
 
 type ResponseWriterSpy struct {
 	http.ResponseWriter
+	status                 int // status code passed to WriteHeader
 	writeStarted           bool
 	writeCalled            bool
 	writeHeaderCalled      bool
@@ -18,13 +19,21 @@ type ResponseWriterSpy struct {
 	afterWriteHooks        []func()
 }
 
+func (w *ResponseWriterSpy) Status() int {
+	return w.status
+}
+
 func (w *ResponseWriterSpy) WriteHeader(status int) {
+	w.status = status
 	w.writeHeaderCalled = true
 	w.execBeforeWriteHeaderHooks()
 	w.ResponseWriter.WriteHeader(status)
 }
 
 func (w *ResponseWriterSpy) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
 	w.writeCalled = true
 	if !w.writeStarted {
 		w.execBeforeWriteHeaderHooks()

@@ -3,10 +3,11 @@ package socket
 import (
 	"context"
 	"errors"
-	"github.com/nidorx/chain"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/nidorx/chain"
 )
 
 type transportT struct {
@@ -175,7 +176,7 @@ func Test_Socket(t *testing.T) {
 	var ok bool
 
 	// Channel JOIN
-	request = newMessage(MessageTypePush, "chat:lobby", "stx_join", map[string]any{"id": "USER1"})
+	request = newMessage(MessageTypePush, "chat:lobby", "_join", map[string]any{"id": "USER1"})
 	request.Ref = 1
 	request.JoinRef = 1
 	transport.SendMessage(request)
@@ -242,7 +243,7 @@ func Test_Socket(t *testing.T) {
 	}
 
 	// Channel LEAVE
-	request = newMessage(MessageTypePush, "chat:lobby", "stx_leave", nil)
+	request = newMessage(MessageTypePush, "chat:lobby", "_leave", nil)
 	request.Ref = 3
 	request.JoinRef = 1
 	transport.SendMessage(request)

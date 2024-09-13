@@ -9,9 +9,10 @@
     const MESSAGE_KIND_BROADCAST = 2;
 
     let logGroupLen = Math.max(TRANSPORT.length, CHANNEL.length, SOCKET.length);
-    const chain = window.chain = {
+
+    const Chain = window.Chain = {
         Socket: Socket,
-        Transport: {SSE: TransportSSE},
+        Transport: { SSE: TransportSSE },
         Retry: Retry,
         Events: Events,
         Push: Push,
@@ -20,51 +21,51 @@
         Decode: decode,
         Debug: true,
         log: (group, template, ...params) => {
-            if (typeof group === 'string' && chain[`Debug${group}`] === false) {
-                return
+            if (typeof group === 'string' && Chain[`Debug${group}`] === false) {
+                return;
             }
-            if (chain.Debug || (typeof group === 'string' && chain[`Debug${group}`])) {
+            if (Chain.Debug || (typeof group === 'string' && Chain[`Debug${group}`])) {
                 if (typeof template !== 'string') {
-                    params = [template, ...params]
-                    template = ''
+                    params = [template, ...params];
+                    template = '';
 
                     if (typeof group !== 'string') {
-                        params = [group, ...params]
-                        group = ''
+                        params = [group, ...params];
+                        group = '';
                     }
                 }
 
-                logGroupLen = Math.max(logGroupLen, group.length)
+                logGroupLen = Math.max(logGroupLen, group.length);
                 console.log(
                     `${`                           ${group}`.substr(-logGroupLen)}: ${template}`,
                     ...params
-                )
+                );
             }
         }
     }
 
     function encode(message) {
-        let {joinRef, ref, topic, event, payload} = message
+        let { joinRef, ref, topic, event, payload } = message;
         let s = JSON.stringify([MESSAGE_KIND_PUSH, joinRef, ref, topic, event, payload]);
-        return s.substr(1, s.length - 2)
+        return s.substr(1, s.length - 2);
     }
 
     function decode(rawMessage) {
         // Push      = [kind, joinRef, ref,  topic, event, payload]
         // Reply     = [kind, joinRef, ref, status,        payload]
         // Broadcast = [kind,                topic, event, payload]
-        let [kind, joinRef, ref, topic, event, payload] = JSON.parse(`[${rawMessage}]`)
+        let [kind, joinRef, ref, topic, event, payload] = JSON.parse(`[${rawMessage}]`);
         if (kind === MESSAGE_KIND_REPLY) {
-            payload = {status: topic === 0 ? 'ok' : 'error', response: event};
-            event = 'stx_reply';
-            topic = undefined
+            payload = { status: topic === 0 ? 'ok' : 'error', response: event };
+            event = '_reply';
+            topic = undefined;
         } else if (kind === MESSAGE_KIND_BROADCAST) {
             payload = topic;
             event = ref;
             topic = joinRef;
             joinRef = ref = undefined;
         }
-        return {joinRef: joinRef, ref: ref, topic: topic, event: event, payload: payload, kind: kind}
+        return { joinRef: joinRef, ref: ref, topic: topic, event: event, payload: payload, kind: kind };
     }
 
     /**
@@ -76,19 +77,19 @@
      */
     function Socket(endpoint, options = {}) {
 
-        const events = Events()
+        const events = Events();
         const channels = [];
-        const sendBuffer = []
+        const sendBuffer = [];
 
         let ref = 1;
         let connected = false;
 
         let transport = options.transport || TransportSSE;
         let conn = transport(endpoint, options.transportOptions || {})
-        conn.on("open", onConnOpen)
-        conn.on("error", onConnError)
-        conn.on("message", onConnMessage)
-        conn.on("close", onConnClose)
+        conn.on("open", onConnOpen);
+        conn.on("error", onConnError);
+        conn.on("message", onConnMessage);
+        conn.on("close", onConnClose);
 
         const socket = {
             timeout: options.timeout || 30000,
@@ -103,9 +104,9 @@
             disconnect: disconnect,
             leaveOpenTopic: leaveOpenTopic,
             connect: conn.connect
-        }
+        };
 
-        return socket
+        return socket;
 
         /**
          * Initiates a new channel for the given topic
@@ -115,39 +116,39 @@
          * @returns {Object}
          */
         function channel(topic, params = {}, options = {}) {
-            let channel = Channel(topic, params, socket, options)
-            channels.push(channel)
-            return channel
+            let channel = Channel(topic, params, socket, options);
+            channels.push(channel);
+            return channel;
         }
 
         function remove(channel) {
-            let idx = channels.indexOf(channel)
+            let idx = channels.indexOf(channel);
             if (idx >= 0) {
-                channels.splice(idx, 1)
+                channels.splice(idx, 1);
             }
         }
 
         function leaveOpenTopic(topic) {
             let dupChannel = channels.find(c => {
-                return c.topic === topic && (c.isJoined() || c.isJoining())
+                return c.topic === topic && (c.isJoined() || c.isJoining());
             })
             if (dupChannel) {
-                chain.log(SOCKET, 'leaving duplicate topic "%s"', topic)
-                dupChannel.leave()
+                Chain.log(SOCKET, 'leaving duplicate topic "%s"', topic);
+                dupChannel.leave();
             }
         }
 
         function push(message) {
-            let {topic, event, payload, ref, joinRef} = message
-            const data = encode(message)
+            let { topic, event, payload, ref, joinRef } = message;
+            const data = encode(message);
             if (connected) {
-                chain.log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload)
-                conn.send(data)
+                Chain.log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload);
+                conn.send(data);
             } else {
-                chain.log(SOCKET, 'push %s %s (%s, %s) [scheduled]', topic, event, joinRef, ref, payload)
+                Chain.log(SOCKET, 'push %s %s (%s, %s) [scheduled]', topic, event, joinRef, ref, payload);
                 sendBuffer.push(() => {
-                    chain.log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload)
-                    conn.send(data)
+                    Chain.log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload);
+                    conn.send(data);
                 })
             }
         }
@@ -160,51 +161,51 @@
         function makeRef() {
             ref++;
             if (ref === Number.MAX_SAFE_INTEGER) {
-                ref = 1
+                ref = 1;
             }
 
-            return ref
+            return ref;
         }
 
         function onConnOpen() {
-            chain.log(SOCKET, 'connected to %s', endpoint)
+            Chain.log(SOCKET, 'connected to %s', endpoint);
 
-            connected = true
+            connected = true;
 
             if (sendBuffer.length > 0) {
                 // flush send buffer
-                sendBuffer.forEach(callback => callback())
-                sendBuffer.splice(0)
+                sendBuffer.forEach(callback => callback());
+                sendBuffer.splice(0);
             }
 
-            events.emit('open')
+            events.emit('open');
         }
 
         function onConnClose(event) {
-            connected = false
-            events.emit('close')
+            connected = false;
+            events.emit('close');
         }
 
         function onConnMessage(data) {
-            let message = decode(data)
-            let {topic, event, payload, ref, joinRef} = message
-            chain.log(SOCKET, 'receive %s %s %s',
+            let message = decode(data);
+            let { topic, event, payload, ref, joinRef } = message;
+            Chain.log(SOCKET, 'receive %s %s %s',
                 topic || '', event || '', (ref || joinRef) ? (`(${joinRef || ''}, ${ref || ''})`) : '', payload
-            )
+            );
 
             channels.forEach(channel => {
                 channel.trigger(event, payload, topic, ref, joinRef)
-            })
+            });
 
-            events.emit('message', message)
+            events.emit('message', message);
         }
 
         function onConnError(error) {
-            events.emit('error', error)
+            events.emit('error', error);
         }
 
         function disconnect(callback, code, reason) {
-            conn.close()
+            conn.close();
         }
     }
 
@@ -236,8 +237,8 @@
             push: push,
             trigger: trigger,
             on: events.on.bind(events),
-            onClose: events.on.bind(events, "stx_close"),
-            onError: events.on.bind(events, "stx_error"),
+            onClose: events.on.bind(events, "_close"),
+            onError: events.on.bind(events, "_error"),
             isClosed: stateIsFn(CHANNEL_STATE_CLOSED),
             isErrored: stateIsFn(CHANNEL_STATE_ERRORED),
             isJoined: stateIsFn(CHANNEL_STATE_JOINED),
@@ -245,57 +246,56 @@
             isLeaving: stateIsFn(CHANNEL_STATE_LEAVING),
             topic: () => topic,
             joinRef: joinRef,
-        }
+        };
 
         let rejoinRetry = Retry(() => {
             if (socket.isConnected()) {
-                rejoin()
+                rejoin();
             }
-        }, socket.rejoinInterval)
+        }, socket.rejoinInterval);
 
         let cancelOnSocketError = socket.on('error', () => {
-            rejoinRetry.reset()
-        })
+            rejoinRetry.reset();
+        });
 
         let cancelOnSocketOpen = socket.on('open', () => {
-            rejoinRetry.reset()
+            rejoinRetry.reset();
             if (channel.isErrored()) {
-                rejoin()
+                rejoin();
             }
-        })
+        });
 
-        let joinPush = Push(socket, channel, 'stx_join', chanParams, timeout)
+        let joinPush = Push(socket, channel, '_join', chanParams, timeout)
             .on('ok', () => {
-                state = CHANNEL_STATE_JOINED
-                rejoinRetry.reset()
-                pushBuffer.forEach(push => push.send())
-                pushBuffer.splice(0)
+                state = CHANNEL_STATE_JOINED;
+                rejoinRetry.reset();
+                pushBuffer.forEach(push => push.send());
+                pushBuffer.splice(0);
             })
             .on('error', () => {
-                state = CHANNEL_STATE_ERRORED
+                state = CHANNEL_STATE_ERRORED;
                 if (socket.isConnected()) {
-                    rejoinRetry.retry()
+                    rejoinRetry.retry();
                 }
             })
             .on('timeout', () => {
-                chain.log(CHANNEL, 'timeout %s (%s)', topic, joinRef(), joinPush.timeout())
+                Chain.log(CHANNEL, 'timeout %s (%s)', topic, joinRef(), joinPush.timeout());
 
                 // leave (if joined on server)
-                Push(socket, channel, 'stx_leave', {}, timeout).send()
+                Push(socket, channel, '_leave', {}, timeout).send();
 
-                state = CHANNEL_STATE_ERRORED
-                joinPush.reset()
+                state = CHANNEL_STATE_ERRORED;
+                joinPush.reset();
                 if (socket.isConnected()) {
-                    rejoinRetry.retry()
+                    rejoinRetry.retry();
                 }
             })
 
-
         channel.onClose(() => {
             if (channel.isClosed()) {
-                return
+                return;
             }
-            chain.log(CHANNEL, 'close %s %s', topic, joinRef())
+            Chain.log(CHANNEL, 'close %s %s', topic, joinRef());
 
             cancelOnSocketOpen();
             cancelOnSocketError();
@@ -305,30 +305,30 @@
         })
 
         channel.onError(reason => {
-            chain.log(CHANNEL, 'error %s', topic, reason)
+            Chain.log(CHANNEL, 'error %s', topic, reason);
 
             if (channel.isJoining()) {
-                joinPush.reset()
+                joinPush.reset();
             }
-            state = CHANNEL_STATE_ERRORED
+            state = CHANNEL_STATE_ERRORED;
             if (socket.isConnected()) {
-                rejoinRetry.retry()
+                rejoinRetry.retry();
             }
         })
 
-        channel.on('stx_reply', (payload, ref) => {
-            trigger(`chan_reply_${ref}`, payload)
-        })
+        channel.on('_reply', (payload, ref) => {
+            trigger(`chan_reply_${ref}`, payload);
+        });
 
         // Overridable message hook
         // Receives all events for specialized message handling before dispatching to the channel callbacks.
         // Must return the payload, modified or unmodified
-        let onMessage = typeof options.OnMessage == 'function' ? options.OnMessage : (_e, payload) => payload
+        let onMessage = typeof options.OnMessage == 'function' ? options.OnMessage : (_e, payload) => payload;
 
-        return channel
+        return channel;
 
         function joinRef() {
-            return joinPush.ref()
+            return joinPush.ref();
         }
 
         /**
@@ -339,22 +339,22 @@
          */
         function join(p_timeout = timeout) {
             if (joinedOnce) {
-                throw new Error("tried to join multiple times. 'join' can only be called a single time per channel instance")
+                throw new Error("tried to join multiple times. 'join' can only be called a single time per channel instance");
             } else {
-                timeout = p_timeout
-                joinedOnce = true
-                rejoin()
-                return joinPush
+                timeout = p_timeout;
+                joinedOnce = true;
+                rejoin();
+                return joinPush;
             }
         }
 
         function rejoin() {
             if (channel.isLeaving()) {
-                return
+                return;
             }
-            socket.leaveOpenTopic(topic)
-            state = CHANNEL_STATE_JOINING
-            joinPush.resend(timeout)
+            socket.leaveOpenTopic(topic);
+            state = CHANNEL_STATE_JOINING;
+            joinPush.resend(timeout);
         }
 
         /**
@@ -379,21 +379,21 @@
             state = CHANNEL_STATE_LEAVING;
 
             let onClose = () => {
-                chain.log(CHANNEL, 'leave %s', topic)
-                trigger('stx_close', 'leave')
+                Chain.log(CHANNEL, 'leave %s', topic);
+                trigger('_close', 'leave');
             }
 
-            let leavePush = Push(socket, channel, 'phx_leave', {}, p_timeout)
+            let leavePush = Push(socket, channel, '_leave', {}, p_timeout)
                 .on('ok', onClose)
                 .on('timeout', onClose);
 
             leavePush.send();
 
             if (!canPush()) {
-                leavePush.trigger('ok', {})
+                leavePush.trigger('ok', {});
             }
 
-            return leavePush
+            return leavePush;
         }
 
         /**
@@ -414,45 +414,45 @@
          * @return {any}
          */
         function push(event, payload, p_timeout = timeout) {
-            payload = payload || {}
+            payload = payload || {};
             if (!joinedOnce) {
-                throw new Error(`tried to push '${event}' to '${topic}' before joining. Use channel.join() before pushing events`)
+                throw new Error(`tried to push '${event}' to '${topic}' before joining. Use channel.join() before pushing events`);
             }
 
-            let push = Push(socket, channel, event, payload, p_timeout)
+            let push = Push(socket, channel, event, payload, p_timeout);
             if (canPush()) {
-                push.send()
+                push.send();
             } else {
-                push.startTimeout()
-                pushBuffer.push(push)
+                push.startTimeout();
+                pushBuffer.push(push);
             }
-            return push
+            return push;
         }
 
         function trigger(event, payload, p_topic, ref, p_joinRef) {
             if (p_topic && topic !== p_topic) {
                 // to other channel
-                return
+                return;
             }
             if (p_joinRef && p_joinRef !== joinRef()) {
                 // outdated message or to other channel
-                return
+                return;
             }
 
             let handledPayload = onMessage(event, payload, ref, p_joinRef);
             if (payload && !handledPayload) {
-                throw new Error("channel onMessage callbacks must return the payload, modified or unmodified")
+                throw new Error("channel onMessage callbacks must return the payload, modified or unmodified");
             }
 
-            events.emit(event, handledPayload, ref, p_joinRef || joinRef())
+            events.emit(event, handledPayload, ref, p_joinRef || joinRef());
         }
 
         function canPush() {
-            return socket.isConnected() && channel.isJoined()
+            return socket.isConnected() && channel.isJoined();
         }
 
         function stateIsFn(s) {
-            return () => state === s
+            return () => state === s;
         }
     }
 
@@ -469,24 +469,24 @@
      * @constructor
      */
     function Push(socket, channel, event, payload, timeout) {
-        const events = Events()
+        const events = Events();
 
-        payload = payload || {}
-        let received = null
-        let timer = null
-        let sent = false
-        let ref = socket.ref()
-        let refEvent
-        let refEventCancel
+        payload = payload || {};
+        let received = null;
+        let timer = null;
+        let sent = false;
+        let ref = socket.ref();
+        let refEvent;
+        let refEventCancel;
 
         const push = {
             on: (event, callback) => {
                 if (hasReceived(event)) {
-                    queueMicrotask(callback.bind(null, received.response))
+                    queueMicrotask(callback.bind(null, received.response));
                 } else {
-                    events.on(event, callback)
+                    events.on(event, callback);
                 }
-                return push
+                return push;
             },
             send: send,
             resend: resend,
@@ -496,76 +496,77 @@
             cancelTimeout: cancelTimeout,
             startTimeout: startTimeout,
             ref: () => ref
-        }
-        return push
+        };
+
+        return push;
 
         function send() {
             if (hasReceived('timeout')) {
-                return
+                return;
             }
-            startTimeout()
-            sent = true
+            startTimeout();
+            sent = true;
             socket.push({
                 topic: channel.topic(),
                 event: event,
                 payload: payload,
                 ref: ref,
                 joinRef: channel.joinRef()
-            })
+            });
         }
 
         function resend(p_timeout) {
-            timeout = p_timeout
-            reset()
-            send()
+            timeout = p_timeout;
+            reset();
+            send();
         }
 
         function reset() {
             if (refEventCancel) {
-                refEventCancel()
-                refEventCancel = null
+                refEventCancel();
+                refEventCancel = null;
             }
-            sent = false
-            ref = null
-            refEvent = null
-            received = null
+            sent = false;
+            ref = null;
+            refEvent = null;
+            received = null;
         }
 
         function cancelTimeout() {
-            clearTimeout(timer)
-            timer = null
+            clearTimeout(timer);
+            timer = null;
         }
 
         function startTimeout() {
             if (timer) {
-                cancelTimeout()
+                cancelTimeout();
             }
-            ref = socket.ref()
-            refEvent = `chan_reply_${ref}`
+            ref = socket.ref();
+            refEvent = `chan_reply_${ref}`;
 
             refEventCancel = channel.on(refEvent, payload => {
                 if (refEventCancel) {
-                    refEventCancel()
-                    refEventCancel = null
+                    refEventCancel();
+                    refEventCancel = null;
                 }
-                cancelTimeout()
-                received = payload
-                let {status, response, _ref} = payload
-                events.emit(status, response)
-            })
+                cancelTimeout();
+                received = payload;
+                let { status, response, _ref } = payload;
+                events.emit(status, response);
+            });
 
             timer = setTimeout(() => {
-                trigger("timeout", {})
-            }, timeout)
+                trigger("timeout", {});
+            }, timeout);
         }
 
         function hasReceived(status) {
-            return received && received.status === status
+            return received && received.status === status;
         }
 
         function trigger(status, response) {
             // event, payload, topic, ref, joinRef
-            channel.trigger(refEvent, {status, response})
+            channel.trigger(refEvent, { status, response });
         }
     }
 
@@ -587,10 +588,10 @@
             // fire and forget
             fetch(pushEndpoint, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: data,
             }).catch((error) => {
-                chain.error(TRANSPORT, 'send error', error, data);
+                Chain.error(TRANSPORT, 'send error', error, data);
             });
         }
 
@@ -598,28 +599,28 @@
             source = new EventSource(parseUrl(endpoint, '/sse', options.params));
 
             source.onmessage = (event) => {
-                chain.log(TRANSPORT, 'message', event)
-                events.emit('message', event.data)
-            }
+                Chain.log(TRANSPORT, 'message', event);
+                events.emit('message', event.data);
+            };
 
             source.onerror = (event) => {
-                chain.log(TRANSPORT, 'error', event)
-                events.emit('error')
-            }
+                Chain.log(TRANSPORT, 'error', event);
+                events.emit('error');
+            };
 
             source.onopen = (event) => {
-                chain.log(TRANSPORT, 'open', event)
-                events.emit('open')
-            }
+                Chain.log(TRANSPORT, 'open', event);
+                events.emit('open');
+            };
         }
 
         function close() {
             if (!source) {
-                return
+                return;
             }
-            chain.log(TRANSPORT, 'close')
-            source.close()
-            events.emit('close')
+            Chain.log(TRANSPORT, 'close');
+            source.close();
+            events.emit('close');
         }
 
         return {
@@ -627,7 +628,7 @@
             send: send,
             connect: connect,
             close: close,
-        }
+        };
     }
 
     /**
@@ -639,15 +640,15 @@
      * @constructor
      */
     function Retry(callback, intervals) {
-        intervals = intervals.slice(0).sort()
-        let maxInterval = Math.max(...intervals)
+        intervals = intervals.slice(0).sort();
+        let maxInterval = Math.max(...intervals);
         let timer = null;
         let tries = 0;
 
         return {
             reset: reset,
             retry: retry
-        }
+        };
 
         function reset() {
             tries = 0;
@@ -673,23 +674,24 @@
         const events = {};
         return {
             emit(event, ...args) {
-                let callbacks = events[event] || []
+                let callbacks = events[event] || [];
                 for (let i = 0, length = callbacks.length; i < length; i++) {
-                    callbacks[i](...args)
+                    callbacks[i](...args);
                 }
             },
+            // @TODO: fluent interface (.on().on().on())
             on(event, cb) {
-                events[event]?.push(cb) || (events[event] = [cb])
+                events[event]?.push(cb) || (events[event] = [cb]);
                 // off
                 return () => {
-                    let callbacks = events[event]
+                    let callbacks = events[event];
                     if (callbacks) {
                         let idx = callbacks.indexOf(cb);
                         if (idx >= 0) {
-                            callbacks.splice(idx, 1)
+                            callbacks.splice(idx, 1);
                         }
                     }
-                }
+                };
             }
         }
     }
@@ -701,13 +703,13 @@
         if (params) {
             for (let key in params) {
                 if (queryString.length > 0) {
-                    queryString = queryString + '&'
+                    queryString = queryString + '&';
                 }
-                queryString = queryString + `${key}=${encodeURIComponent(params[key])}`
+                queryString = queryString + `${key}=${encodeURIComponent(params[key])}`;
             }
         }
         return `${basePath}?${queryString}`;
     }
 
-    return chain
+    return Chain;
 })()

@@ -10,7 +10,7 @@ type RouteStorage struct {
 }
 
 func (s *RouteStorage) add(route *Route) {
-	details := route.Path
+	details := route.Info
 
 	numSegments := len(details.segments)
 	if s.routes == nil {
@@ -23,7 +23,7 @@ func (s *RouteStorage) add(route *Route) {
 		for oNumSegments, routes := range s.routes {
 			if oNumSegments < numSegments {
 				for _, other := range routes {
-					if other.Path.hasWildcard {
+					if other.Info.hasWildcard {
 						s.routes[numSegments] = append(s.routes[numSegments], other)
 					}
 				}
@@ -34,7 +34,7 @@ func (s *RouteStorage) add(route *Route) {
 
 	sort.Slice(s.routes[numSegments], func(i, j int) bool {
 		// high priority at the beginning'
-		return s.routes[numSegments][i].Path.priority > s.routes[numSegments][j].Path.priority
+		return s.routes[numSegments][i].Info.priority > s.routes[numSegments][j].Info.priority
 	})
 
 	if details.hasWildcard {
@@ -43,7 +43,7 @@ func (s *RouteStorage) add(route *Route) {
 			if oNumSegments > numSegments {
 				s.routes[oNumSegments] = append(s.routes[oNumSegments], route)
 				sort.Slice(s.routes[oNumSegments], func(i, j int) bool {
-					return s.routes[oNumSegments][i].Path.priority > s.routes[oNumSegments][j].Path.priority
+					return s.routes[oNumSegments][i].Info.priority > s.routes[oNumSegments][j].Info.priority
 				})
 			}
 		}
@@ -70,7 +70,7 @@ func (s *RouteStorage) lookup(ctx *Context) *Route {
 
 	nextRoute:
 		for _, route := range routes {
-			details := route.Path
+			details := route.Info
 			if !details.hasWildcard && i < segmentsCount {
 				// at this point it's just looking for the wildcard that satisfies this route
 				continue
@@ -135,7 +135,7 @@ func (s *RouteStorage) lookupCaseInsensitive(ctx *Context) *Route {
 
 	nextRoute:
 		for _, route := range routes {
-			details := route.Path
+			details := route.Info
 			if !details.hasWildcard && i < segmentsCount {
 				// at this point it's just looking for the wildcard that satisfies this route
 				continue

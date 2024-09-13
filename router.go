@@ -350,11 +350,12 @@ func (r *Router) Use(args ...any) Group {
 // Lookup finds the Route and parameters for the given Route and assigns them to the given Context.
 func (r *Router) Lookup(method string, path string) (*Route, *Context) {
 	if registry := r.registries[method]; registry != nil {
-		ctx := r.GetContext(nil, nil, path)
+		ctx := r.poolGetContext(nil, nil, path)
+		ctx.parsePathSegments()
 		if route := registry.findHandle(ctx); route != nil {
 			return route, ctx
 		} else {
-			r.PutContext(ctx)
+			r.poolPutContext(ctx)
 		}
 	}
 	return nil, nil
@@ -402,19 +403,20 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		rw.execAfterWriteHooksCalledByRouter()
 	}()
 
-	ctx = r.GetContext(req, w, "")
+	ctx = r.poolGetContext(req, w, "")
+	ctx.parsePathSegments()
 
 	go func() {
 		// clear context when connection is closed
 		<-ctx.Request.Context().Done()
-		r.PutContext(ctx)
+		r.poolPutContext(ctx)
 	}()
 
 	path := req.URL.Path
 
 	if registry := r.registries[req.Method]; registry != nil {
 		if route := registry.findHandle(ctx); route != nil {
-			ctx.MatchedRoutePath = route.Path.path
+			ctx.Route = route.Info
 			r.updateContext(ctx)
 			if err := route.Dispatch(ctx); err != nil {
 				if r.ErrorHandler != nil {
@@ -454,7 +456,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				ctx2 := &Context{path: pkg.PathClean(path)}
 				ctx2.parsePathSegments()
 				if fixed := registry.findHandleCaseInsensitive(ctx2); fixed != nil {
-					req.URL.Path = fixed.Path.ReplacePath(ctx2)
+					req.URL.Path = fixed.Info.ReplacePath(ctx2)
 					http.Redirect(w, req, req.URL.String(), code)
 					return
 				} else if r.RedirectTrailingSlash {
@@ -467,7 +469,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 					ctx2 = &Context{path: tsrPath}
 					ctx2.parsePathSegments()
 					if fixed = registry.findHandleCaseInsensitive(ctx2); fixed != nil {
-						req.URL.Path = fixed.Path.ReplacePath(ctx2)
+						req.URL.Path = fixed.Info.ReplacePath(ctx2)
 						http.Redirect(w, req, req.URL.String(), code)
 						return
 					}
@@ -506,9 +508,10 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// GetContext returns a new ContextImpl from the pool.
-func (r *Router) GetContext(req *http.Request, w http.ResponseWriter, path string) *Context {
+// poolGetContext returns a new ContextImpl from the pool.
+func (r *Router) poolGetContext(req *http.Request, w http.ResponseWriter, path string) *Context {
 	ctx := r.contextPool.Get().(*Context)
+	ctx.Crypto = crypt
 	ctx.router = r
 	ctx.Writer = w
 	ctx.Request = req
@@ -519,23 +522,24 @@ func (r *Router) GetContext(req *http.Request, w http.ResponseWriter, path strin
 	} else {
 		ctx.path = path
 	}
-	ctx.parsePathSegments()
+
 	return ctx
 }
 
-// PutContext Close frees up resources and is automatically called in the ServeHTTP part of the web server.
-func (r *Router) PutContext(ctx *Context) {
-	if ctx.children != nil {
-		for _, child := range ctx.children {
-			r.PutContext(child)
-		}
-		ctx.children = nil
+// poolPutContext Close frees up resources and is automatically called in the ServeHTTP part of the web server.
+func (r *Router) poolPutContext(ctx *Context) {
+	if ctx == nil {
+		return
 	}
+	for _, child := range ctx.children {
+		r.poolPutContext(child)
+	}
+	ctx.children = nil
 	ctx.router = nil
 	ctx.Writer = nil
 	ctx.Request = nil
 	ctx.data = nil
-	ctx.root = nil
+	ctx.parent = nil
 	r.contextPool.Put(ctx)
 }
 

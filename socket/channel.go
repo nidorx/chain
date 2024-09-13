@@ -14,8 +14,8 @@ import (
 type LeaveReason int
 
 const (
-	LeaveReasonLeave  = LeaveReason(0) // Client called stx_leave event (channel.leave()).
-	LeaveReasonRejoin = LeaveReason(1) // Client called stx_join and there is already an active socket for the same topic
+	LeaveReasonLeave  = LeaveReason(0) // Client called _leave event (channel.leave()).
+	LeaveReasonRejoin = LeaveReason(1) // Client called _join and there is already an active socket for the same topic
 	LeaveReasonClose  = LeaveReason(2) // Connection lost and session is terminated. See Session.ScheduleShutdown
 )
 
@@ -24,7 +24,7 @@ var (
 	ErrUnmatchedTopic = fmt.Errorf("unmatched topic")
 )
 
-// JoinHandler invoked when the client joins a channel (event:stx_join, `js: channel.join()`).
+// JoinHandler invoked when the client joins a channel (event:_join, `js: channel.join()`).
 //
 // See Channel.Join
 type JoinHandler func(payload any, socket *Socket) (reply any, err error)

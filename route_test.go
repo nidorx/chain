@@ -12,42 +12,42 @@ func Test_PathInfo_extract(t *testing.T) {
 	}{
 		{
 			path: "/",
-			info: `PathDetails{path: "/", hasStatic: true, hasParameter: false, hasWildcard: false, params: [], priority: 3, segments: []}`,
+			info: `RouteInfo{path: "/", hasStatic: true, hasParameter: false, hasWildcard: false, params: [], priority: 3, segments: []}`,
 		},
 		{
 			path: "/doc/",
-			info: `PathDetails{path: "/doc/", hasStatic: true, hasParameter: false, hasWildcard: false, params: [], priority: 15, segments: [doc, ]}`,
+			info: `RouteInfo{path: "/doc/", hasStatic: true, hasParameter: false, hasWildcard: false, params: [], priority: 15, segments: [doc, ]}`,
 		},
 		{
 			path: "/search/",
-			info: `PathDetails{path: "/search/", hasStatic: true, hasParameter: false, hasWildcard: false, params: [], priority: 15, segments: [search, ]}`,
+			info: `RouteInfo{path: "/search/", hasStatic: true, hasParameter: false, hasWildcard: false, params: [], priority: 15, segments: [search, ]}`,
 		},
 		{
 			path: "/user/:name",
-			info: `PathDetails{path: "/user/:name", hasStatic: true, hasParameter: true, hasWildcard: false, params: [name], priority: 14, segments: [user, :]}`,
+			info: `RouteInfo{path: "/user/:name", hasStatic: true, hasParameter: true, hasWildcard: false, params: [name], priority: 14, segments: [user, :]}`,
 		},
 		{
 			path: "/search/:query",
-			info: `PathDetails{path: "/search/:query", hasStatic: true, hasParameter: true, hasWildcard: false, params: [query], priority: 14, segments: [search, :]}`,
+			info: `RouteInfo{path: "/search/:query", hasStatic: true, hasParameter: true, hasWildcard: false, params: [query], priority: 14, segments: [search, :]}`,
 		},
 		{
 			path: "/cmd/:tool/",
-			info: `PathDetails{path: "/cmd/:tool/", hasStatic: true, hasParameter: true, hasWildcard: false, params: [tool], priority: 38, segments: [cmd, :, ]}`,
+			info: `RouteInfo{path: "/cmd/:tool/", hasStatic: true, hasParameter: true, hasWildcard: false, params: [tool], priority: 38, segments: [cmd, :, ]}`,
 		},
 		{
 			path: "/src/*filepath",
-			info: `PathDetails{path: "/src/*filepath", hasStatic: true, hasParameter: false, hasWildcard: true, params: [filepath], priority: 13, segments: [src, *]}`,
+			info: `RouteInfo{path: "/src/*filepath", hasStatic: true, hasParameter: false, hasWildcard: true, params: [filepath], priority: 13, segments: [src, *]}`,
 		},
 		{
 			path: "/user/:name/about",
-			info: `PathDetails{path: "/user/:name/about", hasStatic: true, hasParameter: true, hasWildcard: false, params: [name], priority: 38, segments: [user, :, about]}`,
+			info: `RouteInfo{path: "/user/:name/about", hasStatic: true, hasParameter: true, hasWildcard: false, params: [name], priority: 38, segments: [user, :, about]}`,
 		},
 		//"/info/:user/public",
 		//"/cmd/:tool/:sub"
 		//"/files/:dir/*filepath",
 		{
 			path: "/files/:dir/*filepath",
-			info: `PathDetails{path: "/files/:dir/*filepath", hasStatic: true, hasParameter: true, hasWildcard: true, params: [dir, filepath], priority: 36, segments: [files, :, *]}`,
+			info: `RouteInfo{path: "/files/:dir/*filepath", hasStatic: true, hasParameter: true, hasWildcard: true, params: [dir, filepath], priority: 36, segments: [files, :, *]}`,
 		},
 		//"/src/js/:folder/:name/:file",
 		//"/src/:type/vendors/:name/index",
@@ -63,8 +63,8 @@ func Test_PathInfo_extract(t *testing.T) {
 	}
 	for _, tt := range routes {
 		t.Run(tt.path, func(t *testing.T) {
-			a := ParsePathDetails(tt.path)
-			//PathDetails{
+			a := ParseRouteInfo(tt.path)
+			//RouteInfo{
 			//	path: "/doc/", segments: 1, hasStatic: true, hasParameter: false, hasWildcard: false, minLength: 4,
 			//	types: []rune{'.'}, positions: []int{1, 3}, sizes: []int{3}, static: []int{0}, parameter: nil}
 			if tt.info != a.String() {
@@ -109,11 +109,11 @@ func Test_PathInfo_MaybeMatches(t *testing.T) {
 	}
 	for _, tt := range routes {
 		t.Run(tt.first, func(t *testing.T) {
-			first := ParsePathDetails(tt.first)
-			second := ParsePathDetails(tt.second)
-			matches := first.MaybeMatches(second)
+			first := ParseRouteInfo(tt.first)
+			second := ParseRouteInfo(tt.second)
+			matches := first.Matches(second)
 			if matches != tt.expected {
-				t.Errorf("PathDetails.Matches(string) | invalid \n   actual: %v\n expected: %v", matches, tt.expected)
+				t.Errorf("RouteInfo.Matches(string) | invalid \n   actual: %v\n expected: %v", matches, tt.expected)
 			}
 		})
 	}
@@ -173,17 +173,18 @@ func Test_PathInfo_Match(t *testing.T) {
 	}
 	for _, tt := range routes {
 		t.Run(tt.route, func(t *testing.T) {
-			info := ParsePathDetails(tt.route)
-			ctx := route.GetContext(nil, nil, tt.path)
+			info := ParseRouteInfo(tt.route)
+			ctx := route.poolGetContext(nil, nil, tt.path)
+			ctx.parsePathSegments()
 			match, paramNames, paramValues := info.Match(ctx)
 			if match != tt.match {
-				t.Errorf("PathDetails.Match() | invalid 'match'\n   actual: %v\n expected: %v", match, tt.match)
+				t.Errorf("RouteInfo.Match() | invalid 'match'\n   actual: %v\n expected: %v", match, tt.match)
 			} else {
 				if !reflect.DeepEqual(paramNames, tt.paramNames) {
-					t.Errorf("PathDetails.Match() | invalid 'paramNames'\n   actual: %v\n expected: %v", paramNames, tt.paramNames)
+					t.Errorf("RouteInfo.Match() | invalid 'paramNames'\n   actual: %v\n expected: %v", paramNames, tt.paramNames)
 				}
 				if !reflect.DeepEqual(paramValues, tt.paramValues) {
-					t.Errorf("PathDetails.Match() | invalid 'paramValues'\n   actual: %v\n expected: %v", paramValues, tt.paramValues)
+					t.Errorf("RouteInfo.Match() | invalid 'paramValues'\n   actual: %v\n expected: %v", paramValues, tt.paramValues)
 				}
 			}
 		})

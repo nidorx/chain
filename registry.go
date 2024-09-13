@@ -50,12 +50,12 @@ func (r *Registry) addHandle(path string, handle Handle) {
 		r.routes = []*Route{}
 	}
 
-	details := ParsePathDetails(path)
+	details := ParseRouteInfo(path)
 
 	// avoid conflicts
 	for _, route := range r.routes {
-		if details.conflictsWith(route.Path) {
-			slog.Error("[chain] wildcard conflicts", slog.String("new", details.path), slog.String("existing", route.Path.path))
+		if details.conflictsWith(route.Info) {
+			slog.Error("[chain] wildcard conflicts", slog.String("new", details.path), slog.String("existing", route.Info.path))
 			panic("[chain] wildcard conflicts")
 		}
 	}
@@ -77,17 +77,17 @@ func (r *Registry) addHandle(path string, handle Handle) {
 	r.storage.add(r.createRoute(handle, details))
 }
 
-func (r *Registry) createRoute(handle Handle, pathDetails *PathDetails) *Route {
+func (r *Registry) createRoute(handle Handle, info *RouteInfo) *Route {
 	route := &Route{
 		Handle:           handle,
-		Path:             pathDetails,
+		Info:             info,
 		middlewaresAdded: map[*Middleware]bool{},
 	}
 
 	r.routes = append(r.routes, route)
 
 	for _, middleware := range r.middlewares {
-		if route.middlewaresAdded[middleware] != true && middleware.Path.MaybeMatches(route.Path) {
+		if route.middlewaresAdded[middleware] != true && middleware.Path.Matches(route.Info) {
 			route.middlewaresAdded[middleware] = true
 			route.Middlewares = append(route.Middlewares, middleware)
 		}
@@ -103,7 +103,7 @@ func (r *Registry) addMiddleware(path string, middlewares []func(ctx *Context, n
 
 	for _, middleware := range middlewares {
 		info := &Middleware{
-			Path:   ParsePathDetails(path),
+			Path:   ParseRouteInfo(path),
 			Handle: middleware,
 		}
 
@@ -111,7 +111,7 @@ func (r *Registry) addMiddleware(path string, middlewares []func(ctx *Context, n
 
 		// add this MiddlewareFunc to all compatible routes
 		for _, route := range r.routes {
-			if route.middlewaresAdded[info] != true && info.Path.MaybeMatches(route.Path) {
+			if route.middlewaresAdded[info] != true && info.Path.Matches(route.Info) {
 				route.middlewaresAdded[info] = true
 				route.Middlewares = append(route.Middlewares, info)
 			}

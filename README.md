@@ -5,12 +5,6 @@
         To create distributed systems in a simple, elegant and safe way.
     </p>    
 </div>
-
-[//]: # (<a href="https://github.com/syntax-framework/syntax"><img width="160" src="./docs/logo-syntax.png" /></a>)
-
-[//]: # ()
-[//]: # (**chain** is part of the [Syntax Framework]&#40;https://github.com/syntax-framework/syntax&#41;)
-
 ---
 
 Chain is a core library that tries to provide all the necessary machinery to create distributed systems in a simple,

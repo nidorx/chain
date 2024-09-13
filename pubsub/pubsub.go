@@ -17,7 +17,7 @@ var (
 	selfId       = ksuid.New()
 	selfIdBytes  = selfId.Bytes() // 20 bytes
 	selfIdString = selfId.String()
-	directTopic  = "stx:direct:" + selfIdString
+	directTopic  = "direct:" + selfIdString
 	ErrNoAdapter = errors.New("no adapter matches topic to broadcast the message")
 )
 
@@ -129,7 +129,7 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 		var compressed []byte
 		if compressed, err = compressPayload(msgToSend); err != nil {
 			slog.Warn(
-				"[chain] Failed to compress payload",
+				"[chain.pubsub] failed to compress payload",
 				slog.Any("error", err),
 			)
 		} else if len(compressed) < len(msgToSend) {
@@ -178,7 +178,7 @@ func DirectBroadcast(nodeId string, topic string, message []byte, options ...*Op
 	buf.WriteString(topic)
 	buf.Write(message)
 
-	return broadcastMessage(messageTypeDirectBroadcast, "stx:direct:"+nodeId, buf.Bytes(), options...)
+	return broadcastMessage(messageTypeDirectBroadcast, "direct:"+nodeId, buf.Bytes(), options...)
 }
 
 // Broadcast broadcasts message on given topic across the whole cluster.
@@ -214,7 +214,7 @@ func broadcastMessage(msgType messageType, topic string, message []byte, options
 		var compressed []byte
 		if compressed, err = compressPayload(msgToSend); err != nil {
 			slog.Warn(
-				"[chain] Failed to compress payload",
+				"[chain.pubsub] failed to compress payload",
 				slog.Any("error", err),
 			)
 		} else if len(compressed) < len(msgToSend) {

@@ -14,8 +14,7 @@
 //	router := chain.New()
 //	router.Use(session.Manager{
 //		Store: session.Cookie{
-//	    	Key: 			"_my_app_session",
-//	        Log: 			"debug"
+//	    	Key: 			"_my_app_session"
 //		}
 //	})
 
@@ -23,7 +22,6 @@ package session
 
 import (
 	"log/slog"
-	"strings"
 
 	"github.com/nidorx/chain"
 	"github.com/nidorx/chain/crypto"
@@ -39,7 +37,6 @@ var (
 // https://edgeapi.rubyonrails.org/classes/ActionDispatch/Session/CookieStore.html
 // https://funcptr.net/2013/08/25/user-sessions,-what-data-should-be-stored-where-/
 type Cookie struct {
-	Log               string           // Log level to use when the cookie cannot be decoded. Defaults to `debug`, can be set to false to disable it.
 	Serializer        chain.Serializer // cookie serializer module that defines `Encode(any)` and `Decode(any)`. Defaults to `json`.
 	SigningKeyring    *crypto.Keyring  // a crypto.Keyring used with for signing/verifying a cookie.
 	EncryptionKeyring *crypto.Keyring  // a crypto.Keyring used for encrypting/decrypting a cookie.
@@ -52,10 +49,6 @@ func (c *Cookie) Init(config Config, router *chain.Router) (err error) {
 
 	if c.SigningKeyring == nil {
 		c.SigningKeyring = defaultSigningKeyring
-	}
-
-	if strings.TrimSpace(c.Log) == "" {
-		c.Log = "debug"
 	}
 
 	if c.Serializer == nil {

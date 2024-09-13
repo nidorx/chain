@@ -19,7 +19,7 @@ type Message struct {
 	Ref     int         `json:"r,omitempty"` // The unique number ref
 	Status  int         `json:"s,omitempty"` // The reply status
 	Topic   string      `json:"t,omitempty"` // The string topic or topic:subtopic pair namespace, for example "messages", "messages:123"
-	Event   string      `json:"e,omitempty"` // The string event name, for example "stx_join"
+	Event   string      `json:"e,omitempty"` // The string event name, for example "_join"
 	Payload any         `json:"p,omitempty"` // The Message payload
 }
 

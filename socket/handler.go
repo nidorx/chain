@@ -145,9 +145,9 @@ func (h *Handler) Dispatch(payload []byte, session *Session) {
 		}
 
 		switch message.Event {
-		case "stx_join":
+		case "_join":
 			h.handleJoin(message, session)
-		case "stx_leave":
+		case "_leave":
 			h.handleLeave(message, session)
 		case "heartbeat":
 			h.handleHeartbeat(message, session)
@@ -188,7 +188,7 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 			}
 
 			if socket.joinRef != message.JoinRef {
-				reply := newMessage(MessageTypePush, topic, "stx_close", nil)
+				reply := newMessage(MessageTypePush, topic, "_close", nil)
 				reply.Ref = socket.ref
 				reply.JoinRef = socket.joinRef
 				h.push(reply, session)
