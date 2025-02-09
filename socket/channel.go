@@ -85,7 +85,6 @@ func (c *Channel) Join(topic string, handler JoinHandler) {
 	if err := c.joinHandlers.Insert(topic, handler); err != nil {
 		panic(fmt.Sprintf("[chain.socket] invalid join handler for topic. Topic: %s, Error: %s", topic, err.Error()))
 	}
-	return
 }
 
 // HandleIn Handle incoming `event`s.
@@ -193,7 +192,7 @@ func (c *Channel) Dispatch(topic string, msg any, from string) {
 	var sockets []*Socket
 	if len(c.sockets) > 0 {
 		if ss, exist := c.sockets[topic]; exist {
-			for socket, _ := range ss {
+			for socket := range ss {
 				sockets = append(sockets, socket)
 			}
 		}
@@ -227,11 +226,6 @@ func (c *Channel) Dispatch(topic string, msg any, from string) {
 	for _, socket := range sockets {
 		socket.Send(payload)
 	}
-}
-
-// validate @todo checks if all handlers are configured correctly
-func (c *Channel) validate() (err error) {
-	return nil
 }
 
 func (c *Channel) handleJoin(topic string, payload any, socket *Socket) (reply any, err error) {
@@ -290,7 +284,6 @@ func (c *Channel) handleLeave(socket *Socket, reason LeaveReason) {
 			}
 		}
 	}
-	return
 }
 
 func (c *Channel) handleIn(event string, payload any, socket *Socket) (reply any, err error) {

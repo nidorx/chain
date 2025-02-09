@@ -1,38 +1,70 @@
 /**
  * Client do serviço de mensageria do papo
- *
+ * 
  * Versão modificada do https://github.com/nidorx/chain/tree/main/socket/client
  */
 const SOCKET = 'Socket';
 const CHANNEL = 'Channel';
 const TRANSPORT = 'Transport';
-var MessageKindEnum;
-(function (MessageKindEnum) {
-    MessageKindEnum[MessageKindEnum["PUSH"] = 0] = "PUSH";
-    MessageKindEnum[MessageKindEnum["REPLY"] = 1] = "REPLY";
-    MessageKindEnum[MessageKindEnum["BROADCAST"] = 2] = "BROADCAST";
-})(MessageKindEnum || (MessageKindEnum = {}));
-var ChannelStateEnum;
-(function (ChannelStateEnum) {
-    ChannelStateEnum[ChannelStateEnum["CLOSED"] = 0] = "CLOSED";
-    ChannelStateEnum[ChannelStateEnum["ERRORED"] = 1] = "ERRORED";
-    ChannelStateEnum[ChannelStateEnum["JOINED"] = 2] = "JOINED";
-    ChannelStateEnum[ChannelStateEnum["JOINING"] = 3] = "JOINING";
-    ChannelStateEnum[ChannelStateEnum["LEAVING"] = 4] = "LEAVING";
-})(ChannelStateEnum || (ChannelStateEnum = {}));
+
+enum MessageKindEnum {
+    PUSH = 0,
+    REPLY = 1,
+    BROADCAST = 2
+}
+
+enum ChannelStateEnum {
+    CLOSED = 0,
+    ERRORED = 1,
+    JOINED = 2,
+    JOINING = 3,
+    LEAVING = 4,
+}
+
+interface Message {
+    joinRef: number;
+    ref: number;
+    topic?: string;
+    event: string;
+    kind?: MessageKindEnum;
+    payload: any | string | { status: 'ok' | 'error'; response: string };
+}
+
+interface SocketOptions {
+    transport?: typeof TransportSSE;
+    transportOptions?: TransportOptions
+    timeout?: number;
+    sessionStorage?: Storage;
+    rejoinInterval?: number[];
+    reconnectInterval?: number[];
+}
+
+interface TransportOptions {
+    cors?: boolean;
+    sid?: string;
+    params?: any;
+}
+
+interface ChannelOptions {
+    onMessage?: (_e: string, payload: any, ref?: number, p_joinRef?: number) => any;
+}
+
 /**
  * Copyright 2016 Andrey Sitnik <andrey@sitnik.ru>, https://github.com/ai/nanoevents/blob/main/LICENSE
  */
 class Events {
-    events = {};
-    emit(event, ...args) {
+    readonly events: { [key: string]: Array<(...args: any) => void> } = {};
+
+    emit(event: string, ...args: any) {
         let callbacks = this.events[event] || [];
         for (let i = 0, length = callbacks.length; i < length; i++) {
             callbacks[i](...args);
         }
     }
-    on(event, callback) {
+
+    on(event: string, callback: (...args: any) => void): () => void {
         this.events[event]?.push(callback) || (this.events[event] = [callback]);
+
         // off
         return () => {
             let callbacks = this.events[event];
@@ -45,33 +77,39 @@ class Events {
         };
     }
 }
+
 /**
  * Interface de comunicação com o servidor
  */
 class Socket extends Events {
-    ref = 1;
-    connected = false;
-    channels = [];
-    sendBuffer = [];
-    transport;
-    timeout;
-    endpoint;
-    sessionStorage;
-    rejoinInterval;
-    reconnectInterval;
-    constructor(endpoint, options = {}) {
+
+    private ref = 1;
+    private connected = false;
+    private readonly channels: Channel[] = [];
+    private readonly sendBuffer: Array<() => void> = [];
+    private readonly transport: TransportSSE;
+    private readonly timeout: number;
+    private readonly endpoint: string;
+    private readonly sessionStorage: Storage;
+    private readonly rejoinInterval: number[];
+    private readonly reconnectInterval: number[];
+
+    constructor(endpoint: string, options: SocketOptions = {}) {
         super();
+
         this.endpoint = endpoint;
         this.timeout = options.timeout || 30000;
         this.rejoinInterval = options.rejoinInterval || [1000, 2000, 5000, 10000];
         this.reconnectInterval = options.reconnectInterval || [10, 50, 100, 150, 200, 250, 500, 1000, 2000, 5000];
         this.sessionStorage = options.sessionStorage || (window.sessionStorage);
+
         // socket id per browser tab
         let sid = this.getSession("chain:sid");
         if (sid == null) {
             sid = (Math.random() + 1).toString(36).substring(7);
             this.storeSession("chain:sid", sid);
         }
+
         this.transport = new (options.transport || TransportSSE)(endpoint, {
             ...(options.transportOptions || {}),
             sid: sid,
@@ -81,59 +119,69 @@ class Socket extends Events {
         this.transport.on("message", this.onConnMessage.bind(this));
         this.transport.on("close", this.onConnClose.bind(this));
     }
-    getSession(key) { return this.sessionStorage.getItem(key); }
-    storeSession(key, value) { this.sessionStorage.setItem(key, value); }
+
+    getSession(key: string) { return this.sessionStorage.getItem(key) }
+
+    storeSession(key: string, value: string) { this.sessionStorage.setItem(key, value) }
+
     getTimeout() {
         return this.timeout;
     }
+
     getRejoinInterval() {
         return this.rejoinInterval;
     }
+
     isConnected() {
         return this.connected;
     }
+
     connect() {
         return this.transport.connect();
     }
-    disconnect(callback, code, reason) {
+
+    disconnect(callback: any, code: any, reason: any) {
         this.transport.close();
     }
+
     /**
      * Initiates a new channel for the given topic
-     *
-     * @param topic
-     * @param params
-     * @param options
-     * @returns
+     * 
+     * @param topic 
+     * @param params 
+     * @param options 
+     * @returns 
      */
-    channel(topic, params = {}, options = {}) {
+    channel(topic: string, params: any = {}, options: any = {}): Channel {
         let channel = new Channel(topic, params, this, options);
         this.channels.push(channel);
         return channel;
     }
-    remove(channel) {
+
+    remove(channel: any) {
         let idx = this.channels.indexOf(channel);
         if (idx >= 0) {
             this.channels.splice(idx, 1);
         }
     }
-    leaveOpenTopic(topic) {
+
+    leaveOpenTopic(topic: string) {
         let dupChannel = this.channels.find(channel => {
             return channel.getTopic() === topic && (channel.isJoined() || channel.isJoining());
-        });
+        })
         if (dupChannel) {
             log(SOCKET, 'leaving duplicate topic "%s"', topic);
             dupChannel.leave();
         }
     }
-    push(message) {
+
+    push(message: Message) {
         let { topic, event, payload, ref, joinRef } = message;
         const data = encode(message);
         if (this.connected) {
             log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload);
             this.transport.send(data);
-        }
-        else {
+        } else {
             log(SOCKET, 'push %s %s (%s, %s) [scheduled]', topic, event, joinRef, ref, payload);
             this.sendBuffer.push(() => {
                 log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload);
@@ -141,115 +189,143 @@ class Socket extends Events {
             });
         }
     }
+
     /**
      * Return the next message ref, accounting for overflows
-     *
-     * @returns
+     * 
+     * @returns 
      */
     nextRef() {
         this.ref++;
         if (this.ref === Number.MAX_SAFE_INTEGER) {
             this.ref = 1;
         }
+
         return this.ref;
     }
-    onConnOpen() {
+
+    private onConnOpen() {
         log(SOCKET, 'connected to %s', this.endpoint);
+
         this.connected = true;
+
         if (this.sendBuffer.length > 0) {
             // flush send buffer
             this.sendBuffer.forEach(callback => callback());
             this.sendBuffer.splice(0);
         }
+
         this.emit('open');
     }
-    onConnClose(event) {
+
+    private onConnClose(event: any) {
         this.connected = false;
         this.emit('close');
     }
-    onConnMessage(data) {
+
+    private onConnMessage(data: string) {
         let message = decode(data);
         let { topic, event, payload, ref, joinRef } = message;
-        log(SOCKET, 'receive %s %s %s', topic || '', event || '', (ref || joinRef) ? (`(${joinRef || ''}, ${ref || ''})`) : '', payload);
+        log(SOCKET, 'receive %s %s %s',
+            topic || '', event || '', (ref || joinRef) ? (`(${joinRef || ''}, ${ref || ''})`) : '', payload
+        );
+
         this.channels.forEach(channel => {
-            channel.trigger(event, payload, topic, ref, joinRef);
+            channel.trigger(event, payload, topic, ref, joinRef)
         });
+
         this.emit('message', message);
     }
-    onConnError(error) {
+
+    private onConnError(error: any) {
         this.emit('error', error);
     }
 }
+
 class Channel extends Events {
-    topic;
-    socket;
-    state;
-    timeout;
-    joinPush;
-    joinedOnce;
-    rejoinRetry;
-    pushBuffer = [];
+
+    private topic: string;
+    private socket: Socket
+    private state: ChannelStateEnum;
+    private timeout: number;
+    private joinPush: Push;
+    private joinedOnce: boolean;
+    private rejoinRetry: Retry;
+    private readonly pushBuffer: Push[] = [];
+
     // Overridable message hook
     // Receives all events for specialized message handling before dispatching to the channel callbacks.
     // Must return the payload, modified or unmodified
-    onMessage;
-    constructor(topic, params, socket, options) {
+    private onMessage: (event: string, payload: any, ref?: number, p_joinRef?: number) => any;
+
+    constructor(topic: string, params: any, socket: Socket, options: ChannelOptions) {
         super();
+
         this.topic = topic;
         this.socket = socket;
         this.timeout = socket.getTimeout();
         this.state = ChannelStateEnum.CLOSED;
-        this.onMessage = options.onMessage ? options.onMessage : (_e, payload) => payload;
+        this.onMessage = options.onMessage ? options.onMessage : (_e: string, payload: any) => payload;
+
         this.rejoinRetry = new Retry(() => {
             if (socket.isConnected()) {
                 this.rejoin();
             }
         }, socket.getRejoinInterval());
+
         const cancelOnSocketError = socket.on('error', () => {
             this.rejoinRetry.reset();
         });
+
         const cancelOnSocketOpen = socket.on('open', () => {
             this.rejoinRetry.reset();
             if (this.isErrored()) {
                 this.rejoin();
             }
         });
+
         this.joinPush = new Push(socket, this, '_join', params, this.timeout)
             .on('ok', () => {
-            this.state = ChannelStateEnum.JOINED;
-            this.rejoinRetry.reset();
-            this.pushBuffer.forEach(push => push.send());
-            this.pushBuffer.splice(0);
-        })
+                this.state = ChannelStateEnum.JOINED;
+                this.rejoinRetry.reset();
+                this.pushBuffer.forEach(push => push.send());
+                this.pushBuffer.splice(0);
+            })
             .on('error', () => {
-            this.state = ChannelStateEnum.ERRORED;
-            if (socket.isConnected()) {
-                this.rejoinRetry.retry();
-            }
-        })
+                this.state = ChannelStateEnum.ERRORED;
+                if (socket.isConnected()) {
+                    this.rejoinRetry.retry();
+                }
+            })
             .on('timeout', () => {
-            log(CHANNEL, 'timeout %s (%s)', topic, this.getJoinRef(), this.joinPush.getTimeout());
-            // leave (if joined on server)
-            new Push(socket, this, '_leave', {}, this.timeout).send();
-            this.state = ChannelStateEnum.ERRORED;
-            this.joinPush.reset();
-            if (socket.isConnected()) {
-                this.rejoinRetry.retry();
-            }
-        });
+                log(CHANNEL, 'timeout %s (%s)', topic, this.getJoinRef(), this.joinPush.getTimeout());
+
+                // leave (if joined on server)
+                new Push(socket, this, '_leave', {}, this.timeout).send();
+
+                this.state = ChannelStateEnum.ERRORED;
+                this.joinPush.reset();
+                if (socket.isConnected()) {
+                    this.rejoinRetry.retry();
+                }
+            });
+
         this.onClose(() => {
             if (this.isClosed()) {
                 return;
             }
             log(CHANNEL, 'close %s %s', topic, this.getJoinRef());
+
             cancelOnSocketOpen();
             cancelOnSocketError();
             this.rejoinRetry.reset();
             this.state = ChannelStateEnum.CLOSED;
             socket.remove(this);
         });
+
         this.onError(reason => {
             log(CHANNEL, 'error %s', topic, reason);
+
             if (this.isJoining()) {
                 this.joinPush.reset();
             }
@@ -257,35 +333,39 @@ class Channel extends Events {
             if (socket.isConnected()) {
                 this.rejoinRetry.retry();
             }
-        });
+        })
+
         this.on('_reply', (payload, ref) => {
             this.trigger(`chan_reply_${ref}`, payload);
         });
     }
-    getTopic() {
+
+    getTopic(): string {
         return this.topic;
     }
+
     getJoinRef() {
         return this.joinPush.getRef();
     }
+
     /**
      * Join the channel
-     *
-     * @param p_timeout
-     * @returns
+     * 
+     * @param p_timeout 
+     * @returns 
      */
     join(p_timeout = this.timeout) {
         if (this.joinedOnce) {
             throw new Error("tried to join multiple times. 'join' can only be called a single time per channel instance");
-        }
-        else {
+        } else {
             this.timeout = p_timeout;
             this.joinedOnce = true;
             this.rejoin();
             return this.joinPush;
         }
     }
-    rejoin() {
+
+    private rejoin() {
         if (this.isLeaving()) {
             return;
         }
@@ -293,6 +373,7 @@ class Channel extends Events {
         this.state = ChannelStateEnum.JOINING;
         this.joinPush.resend(this.timeout);
     }
+
     /**
       * Leaves the channel
       *
@@ -304,27 +385,34 @@ class Channel extends Events {
       *
       * @example
       * channel.leave().on("ok", () => alert("left!") )
-      *
-      * @param p_timeout
-      * @returns
+      * 
+      * @param p_timeout 
+      * @returns 
       */
     leave(p_timeout = this.timeout) {
         this.rejoinRetry.reset();
         this.joinPush.cancelTimeout();
+
         this.state = ChannelStateEnum.LEAVING;
+
         let onClose = () => {
             log(CHANNEL, 'leave %s', this.topic);
             this.trigger('_close', 'leave');
-        };
+        }
+
         let leavePush = new Push(this.socket, this, '_leave', {}, p_timeout)
             .on('ok', onClose)
             .on('timeout', onClose);
+
         leavePush.send();
+
         if (!this.canPush()) {
             leavePush.trigger('ok', {});
         }
+
         return leavePush;
     }
+
     /**
       * Sends a message `event` to syntax with the `payload`.
       *
@@ -336,28 +424,29 @@ class Channel extends Events {
       *    .on("ok", payload => console.log("syntax replied:", payload))
       *    .on("error", err => console.log("syntax errored", err))
       *    .on("timeout", () => console.log("timed out pushing"))
-      *
-      * @param event
-      * @param payload
-      * @param p_timeout
-      * @returns
+      * 
+      * @param event 
+      * @param payload 
+      * @param p_timeout 
+      * @returns 
       */
-    push(event, payload, p_timeout = this.timeout) {
+    push(event: string, payload: any, p_timeout = this.timeout) {
         payload = payload || {};
         if (!this.joinedOnce) {
             throw new Error(`tried to push '${event}' to '${this.topic}' before joining. Use channel.join() before pushing events`);
         }
+
         let push = new Push(this.socket, this, event, payload, p_timeout);
         if (this.canPush()) {
             push.send();
-        }
-        else {
+        } else {
             push.startTimeout();
             this.pushBuffer.push(push);
         }
         return push;
     }
-    trigger(event, payload, p_topic, ref, p_joinRef) {
+
+    trigger(event: string, payload: any, p_topic?: string, ref?: number, p_joinRef?: number) {
         if (p_topic && this.topic !== p_topic) {
             // to other channel
             return;
@@ -366,76 +455,92 @@ class Channel extends Events {
             // outdated message or to other channel
             return;
         }
+
         let handledPayload = this.onMessage(event, payload, ref, p_joinRef);
         if (payload && !handledPayload) {
             throw new Error("channel onMessage callbacks must return the payload, modified or unmodified");
         }
+
         this.emit(event, handledPayload, ref, p_joinRef || this.getJoinRef());
     }
+
     canPush() {
         return this.socket.isConnected() && this.isJoined();
     }
-    onClose(callback) {
-        return this.on("_close", callback);
+
+    onClose(callback: (...args: any) => void): () => void {
+        return this.on("_close", callback)
     }
-    onError(callback) {
-        return this.on("_error", callback);
+
+    onError(callback: (...args: any) => void): () => void {
+        return this.on("_error", callback)
     }
+
     isClosed() {
         return this.state === ChannelStateEnum.CLOSED;
     }
+
     isErrored() {
         return this.state === ChannelStateEnum.ERRORED;
     }
+
     isJoined() {
         return this.state === ChannelStateEnum.JOINED;
     }
+
     isJoining() {
         return this.state === ChannelStateEnum.JOINING;
     }
+
     isLeaving() {
         return this.state === ChannelStateEnum.LEAVING;
     }
 }
+
 /**
  * a Push event
  */
 class Push {
-    ref;
-    sent;
-    timer;
-    timeout;
-    socket;
-    channel;
-    received;
-    refEvent;
-    refEventCancel;
-    event;
-    events = new Events();
-    payload;
-    constructor(socket, channel, event, payload, timeout) {
-        this.ref = socket.nextRef();
+
+    private ref?: number;
+    private sent: boolean;
+    private timer: any;
+    private timeout: number;
+    private socket: Socket;
+    private channel: Channel;
+    private received: any;
+    private refEvent?: string;
+    private refEventCancel?: () => void;
+    private readonly event: string;
+    private readonly events = new Events();
+    private readonly payload: any;
+
+    constructor(socket: Socket, channel: Channel, event: string, payload: any, timeout: number) {
+        this.ref = socket.nextRef()
         this.event = event;
         this.payload = payload || {};
         this.timeout = timeout;
         this.socket = socket;
         this.channel = channel;
     }
+
     getRef() {
-        return this.ref;
+        return this.ref
     }
+
     getTimeout() {
-        return this.timeout;
+        return this.timeout
     }
-    on(event, callback) {
+
+    on(event: string, callback: (...args: any) => void): Push {
         if (this.hasReceived(event)) {
             queueMicrotask(callback.bind(null, this.received.response));
-        }
-        else {
+        } else {
             this.events.on(event, callback);
         }
         return this;
     }
+
     send() {
         if (this.hasReceived('timeout')) {
             return;
@@ -443,18 +548,20 @@ class Push {
         this.startTimeout();
         this.sent = true;
         this.socket.push({
-            ref: this.ref,
-            joinRef: this.channel.getJoinRef(),
+            ref: this.ref!,
+            joinRef: this.channel.getJoinRef()!,
             topic: this.channel.getTopic(),
             event: this.event,
             payload: this.payload,
         });
     }
-    resend(p_timeout) {
+
+    resend(p_timeout: number) {
         this.timeout = p_timeout;
         this.reset();
         this.send();
     }
+
     reset() {
         if (this.refEventCancel) {
             this.refEventCancel();
@@ -465,17 +572,20 @@ class Push {
         this.refEvent = undefined;
         this.received = null;
     }
+
     cancelTimeout() {
         clearTimeout(this.timer);
         this.timer = null;
     }
+
     startTimeout() {
         if (this.timer) {
             this.cancelTimeout();
         }
         this.ref = this.socket.nextRef();
         this.refEvent = `chan_reply_${this.ref}`;
-        this.refEventCancel = this.channel.on(this.refEvent, (payload) => {
+
+        this.refEventCancel = this.channel.on(this.refEvent, (payload: any) => {
             if (this.refEventCancel) {
                 this.refEventCancel();
                 this.refEventCancel = undefined;
@@ -485,33 +595,40 @@ class Push {
             let { status, response, _ref } = payload;
             this.events.emit(status, response);
         });
+
         this.timer = setTimeout(() => {
             this.trigger("timeout", {});
         }, this.timeout);
     }
-    hasReceived(status) {
+
+    hasReceived(status: string) {
         return this.received && this.received.status === status;
     }
-    trigger(status, response) {
+
+    trigger(status: string, response: any) {
         // event, payload, topic, ref, joinRef
-        this.channel.trigger(this.refEvent, { status, response });
+        this.channel.trigger(this.refEvent!, { status, response });
     }
 }
+
 /**
  * Channel transport using server-sent events
  */
 class TransportSSE extends Events {
-    source;
-    options;
-    endpoint;
-    endpointPush;
-    constructor(endpoint, options = {}) {
+
+    private source: EventSource;
+    private readonly options: TransportOptions;
+    private readonly endpoint: string;
+    private readonly endpointPush: string;
+
+    constructor(endpoint: string, options: TransportOptions = {}) {
         super();
         this.options = options;
         this.endpoint = parseUrl(endpoint, '/sse', { ...(this.options.params), sid: options.sid });
         this.endpointPush = parseUrl(endpoint, '/sse', { sid: options.sid });
     }
-    send(data) {
+
+    send(data: any) {
         // fire and forget
         fetch(this.endpointPush, {
             ...(this.options.cors ? { mode: 'cors', credentials: 'include' } : {}),
@@ -522,23 +639,28 @@ class TransportSSE extends Events {
             log(TRANSPORT, 'send error', error, data);
         });
     }
+
     connect() {
         this.source = new EventSource(this.endpoint, {
             ...(this.options.cors ? { withCredentials: true } : {}),
         });
+
         this.source.onmessage = (event) => {
             log(TRANSPORT, 'message', event);
             this.emit('message', event.data);
         };
+
         this.source.onerror = (event) => {
             log(TRANSPORT, 'error', event);
             this.emit('error');
         };
+
         this.source.onopen = (event) => {
             log(TRANSPORT, 'open', event);
             this.emit('open');
         };
     }
+
     close() {
         if (!this.source) {
             return;
@@ -548,24 +670,28 @@ class TransportSSE extends Events {
         this.emit('close');
     }
 }
+
 /**
  * Timer to retry callback
  */
 class Retry {
-    tries = 0;
-    timeout;
-    callback;
-    intervals;
-    intervalMax;
-    constructor(callback, intervals) {
+    private tries = 0;
+    private timeout: any;
+    private readonly callback: (...args: any) => void;
+    private readonly intervals: number[];
+    private readonly intervalMax: number;
+
+    constructor(callback: (...args: any) => void, intervals: number[]) {
         this.callback = callback;
         this.intervals = intervals.slice(0).sort();
         this.intervalMax = Math.max(...this.intervals);
     }
+
     reset() {
         this.tries = 0;
         clearTimeout(this.timeout);
     }
+
     retry() {
         clearTimeout(this.timeout);
         this.timeout = setTimeout(() => {
@@ -574,19 +700,21 @@ class Retry {
         }, this.intervals[this.tries] || this.intervalMax);
     }
 }
-function parseUrl(endpoint, suffix, params) {
+
+function parseUrl(endpoint: string, suffix: string, params?: { [key: string]: any } | undefined) {
+
     let isHttp = endpoint.startsWith('http://');
     let isHttps = endpoint.startsWith('https://');
     let isProtocol = endpoint.startsWith('//');
+
     if (isHttps) {
         endpoint = endpoint.replace('https://', '');
-    }
-    else if (isHttp) {
+    } else if (isHttp) {
         endpoint = endpoint.replace('http://', '');
-    }
-    else if (isProtocol) {
+    } else if (isProtocol) {
         endpoint = endpoint.replace('//', '');
     }
+
     let parts = endpoint.split('?');
     let basePath = (parts[0] + suffix).replaceAll(/[/]+/g, '/');
     let queryString = parts[1] || '';
@@ -598,21 +726,35 @@ function parseUrl(endpoint, suffix, params) {
             queryString = queryString + `${key}=${encodeURIComponent(params[key])}`;
         }
     }
+
     if (isHttps) {
         basePath = `https://${basePath}`;
-    }
-    else if (isHttp) {
+    } else if (isHttp) {
         basePath = `http://${basePath}`;
-    }
-    else if (isProtocol) {
+    } else if (isProtocol) {
         basePath = `//${basePath}`;
     }
+
     if (queryString != '') {
         return `${basePath}?${queryString}`;
     }
+
     return basePath;
 }
-const Chain = {
+
+const Chain: {
+    Socket: typeof Socket;
+    Transport: { SSE: typeof TransportSSE };
+    Retry: typeof Retry;
+    Events: typeof Events;
+    Push: typeof Push;
+    Channel: typeof Channel;
+    Encode: typeof encode;
+    Decode: typeof decode;
+    Debug: boolean;
+    log: (group: string, template: string, ...params: any) => void
+    [key: string]: any
+} = {
     Socket: Socket,
     Transport: { SSE: TransportSSE },
     Retry: Retry,
@@ -623,13 +765,15 @@ const Chain = {
     Decode: decode,
     Debug: true,
     log: log
-};
-function encode(message) {
+}
+
+function encode(message: Message): string {
     let { joinRef, ref, topic, event, payload } = message;
     let s = JSON.stringify([MessageKindEnum.PUSH, joinRef, ref, topic, event, payload]);
     return s.substr(1, s.length - 2);
 }
-function decode(rawMessage) {
+
+function decode(rawMessage: string): Message {
     // Push      = [kind, joinRef, ref,  topic, event, payload]
     // Reply     = [kind, joinRef, ref, status,        payload]
     // Broadcast = [kind,                topic, event, payload]
@@ -638,8 +782,7 @@ function decode(rawMessage) {
         payload = { status: topic === 0 ? 'ok' : 'error', response: event };
         event = '_reply';
         topic = undefined;
-    }
-    else if (kind === MessageKindEnum.BROADCAST) {
+    } else if (kind === MessageKindEnum.BROADCAST) {
         payload = topic;
         event = ref;
         topic = joinRef;
@@ -647,8 +790,10 @@ function decode(rawMessage) {
     }
     return { joinRef, ref, topic, event, payload, kind };
 }
+
 let logGroupLen = Math.max(TRANSPORT.length, CHANNEL.length, SOCKET.length);
-function log(group, template, ...params) {
+
+function log(group: string, template: string, ...params: any) {
     if (typeof group === 'string' && Chain[`Debug${group}`] === false) {
         return;
     }
@@ -656,14 +801,19 @@ function log(group, template, ...params) {
         if (typeof template !== 'string') {
             params = [template, ...params];
             template = '';
+
             if (typeof group !== 'string') {
                 params = [group, ...params];
                 group = '';
             }
         }
+
         logGroupLen = Math.max(logGroupLen, group.length);
-        console.log(`${`                           ${group}`.substr(-logGroupLen)}: ${template}`, ...params);
+        console.log(
+            `${`                           ${group}`.substr(-logGroupLen)}: ${template}`,
+            ...params
+        );
     }
 }
-export default Chain;
-//# sourceMappingURL=chain.js.map
+
+export default Chain

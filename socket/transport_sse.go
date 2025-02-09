@@ -2,17 +2,34 @@ package socket
 
 import (
 	"fmt"
-	"github.com/nidorx/chain"
-	"github.com/nidorx/chain/middlewares/session"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/middlewares/session"
 )
 
 const sseSessionId = "_sse_"
 
+type CorsConfig struct {
+	MaxAge              time.Duration
+	AllowAllOrigins     bool
+	AllowCredentials    bool
+	AllowPrivateNetwork bool
+	AllowOrigins        []string
+	AllowOriginFunc     func(string) bool
+	AllowMethods        []string
+	AllowHeaders        []string
+	ExposeHeaders       []string
+}
+
 type TransportSSE struct {
 	sessionKey string
+	Cors       *CorsConfig
+	Cookie     *session.Config
 }
 
 func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoint string) {
@@ -21,15 +38,119 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 	salt := chain.HashMD5(endpoint)
 	t.sessionKey = sseSessionId + salt[:8]
 
-	// @todo: validate the Origin header
-
-	router.Use(endpoint, &session.Manager{
+	sm := &session.Manager{
 		Config: session.Config{
 			Key:  t.sessionKey,
 			Path: endpoint,
 		},
 		Store: &session.Cookie{},
-	})
+	}
+
+	if t.Cookie != nil {
+		sm.Config.Domain = t.Cookie.Domain
+		sm.Config.MaxAge = t.Cookie.MaxAge
+		sm.Config.Secure = t.Cookie.Secure
+		sm.Config.HttpOnly = t.Cookie.HttpOnly
+		sm.Config.SameSite = t.Cookie.SameSite
+	}
+	router.Use(endpoint, sm)
+
+	if t.Cors != nil {
+		// see: https://github.com/gin-contrib/cors
+
+		maxAge := t.Cors.MaxAge
+		allowAllOrigins := t.Cors.AllowAllOrigins
+		allowCredentials := t.Cors.AllowCredentials
+		allowPrivateNetwork := t.Cors.AllowPrivateNetwork
+		allowMethods := strings.Join(t.Cors.AllowMethods, ",")
+		allowHeaders := strings.Join(t.Cors.AllowHeaders, ",")
+		exposeHeaders := strings.Join(t.Cors.ExposeHeaders, ",")
+
+		router.OPTIONS(endpoint, func(ctx *chain.Context) {
+			if len(allowMethods) > 0 {
+				ctx.SetHeader("Access-Control-Allow-Methods", allowMethods)
+			}
+			if len(allowHeaders) > 0 {
+				ctx.SetHeader("Access-Control-Allow-Headers", allowHeaders)
+			}
+			if maxAge > time.Duration(0) {
+				value := strconv.FormatInt(int64(maxAge/time.Second), 10)
+				ctx.SetHeader("Access-Control-Max-Age", value)
+			}
+
+			if allowPrivateNetwork {
+				ctx.SetHeader("Access-Control-Allow-Private-Network", "true")
+			}
+
+			if allowAllOrigins {
+				ctx.SetHeader("Access-Control-Allow-Origin", "*")
+			} else {
+				// Always set Vary headers
+				// see https://github.com/rs/cors/issues/10,
+				// https://github.com/rs/cors/commit/dbdca4d95feaa7511a46e6f1efb3b3aa505bc43f#commitcomment-12352001
+
+				ctx.AddHeader("Vary", "Origin")
+				ctx.AddHeader("Vary", "Access-Control-Request-Method")
+				ctx.AddHeader("Vary", "Access-Control-Request-Headers")
+			}
+			ctx.WriteHeader(http.StatusNoContent)
+		})
+
+		router.Use(endpoint, func(ctx *chain.Context, next func() error) error {
+			origin := ctx.Request.Header.Get("Origin")
+			if len(origin) == 0 {
+				// request is not a CORS request
+				return next()
+			}
+			host := ctx.Request.Host
+
+			if origin == "http://"+host || origin == "https://"+host {
+				// request is not a CORS request but have origin header.
+				// for example, use fetch api
+				return next()
+			}
+
+			if !allowAllOrigins {
+				isValidOrigin := false
+				for _, value := range t.Cors.AllowOrigins {
+					if value == origin || value == "*" {
+						isValidOrigin = true
+						break
+					}
+				}
+				if !isValidOrigin && t.Cors.AllowOriginFunc != nil {
+					isValidOrigin = t.Cors.AllowOriginFunc(origin)
+				}
+
+				if !isValidOrigin {
+					ctx.Forbidden()
+					return nil
+				}
+			}
+
+			if allowCredentials {
+				ctx.SetHeader("Access-Control-Allow-Credentials", "true")
+			}
+
+			if ctx.Request.Method != "OPTIONS" {
+				if len(exposeHeaders) > 0 {
+					ctx.SetHeader("Access-Control-Expose-Headers", exposeHeaders)
+				}
+
+				if allowAllOrigins {
+					ctx.SetHeader("Access-Control-Allow-Origin", "*")
+				} else {
+					ctx.SetHeader("Vary", "Origin")
+				}
+			}
+
+			if !allowAllOrigins {
+				ctx.SetHeader("Access-Control-Allow-Origin", origin)
+			}
+
+			return next()
+		})
+	}
 
 	// Publish the message.
 	router.POST(endpoint, func(ctx *chain.Context) {
@@ -77,7 +198,6 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 		ctx.SetHeader("Cache-Control", "private, no-cache, no-store, must-revalidate, max-age=0")
 		ctx.SetHeader("Pragma", "no-cache")
 		ctx.SetHeader("Expire", "0")
-		//ctx.SetHeader("Access-Control-Allow-Origin", "*")
 		ctx.WriteHeader(http.StatusOK)
 		flusher.Flush()
 		if err := t.listen(socketSession, ctx, flusher); err != nil {
@@ -92,7 +212,14 @@ func (t *TransportSSE) resumeSession(ctx *chain.Context, handler *Handler) *Sess
 	if sess, err = session.FetchByKey(ctx, t.sessionKey); err != nil {
 		return nil
 	}
-	sid := sess.Get("sid")
+
+	// browser tab identifier
+	sidKey := strings.TrimSpace(ctx.Request.URL.Query().Get("sid"))
+	if sidKey == "" {
+		sidKey = "sid"
+	}
+
+	sid := sess.Get(sidKey)
 	if sid == nil {
 		return nil
 	}
@@ -109,14 +236,20 @@ func (t *TransportSSE) newSession(handler *Handler, ctx *chain.Context, endpoint
 
 	params := map[string]string{}
 	query := ctx.Request.URL.Query()
-	for k, _ := range query {
+	for k := range query {
 		params[k] = query.Get(k)
 	}
 
 	if skt, err = handler.Connect(endpoint, params); err != nil {
 		return
 	}
-	sess.Put("sid", skt.SocketId())
+
+	// browser tab identifier
+	sidKey := strings.TrimSpace(ctx.Request.URL.Query().Get("sid"))
+	if sidKey == "" {
+		sidKey = "sid"
+	}
+	sess.Put(sidKey, skt.SocketId())
 
 	return
 }
