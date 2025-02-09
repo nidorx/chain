@@ -13,6 +13,7 @@ enum MessageKindEnum {
     BROADCAST = 2
 }
 
+
 enum ChannelStateEnum {
     CLOSED = 0,
     ERRORED = 1,
@@ -30,22 +31,23 @@ interface Message {
     payload: any | string | { status: 'ok' | 'error'; response: string };
 }
 
-interface SocketOptions {
+export interface SocketOptions {
     transport?: typeof TransportSSE;
     transportOptions?: TransportOptions
     timeout?: number;
     sessionStorage?: Storage;
     rejoinInterval?: number[];
     reconnectInterval?: number[];
+    disconnectIdleTimeout?: number;
 }
 
-interface TransportOptions {
+export interface TransportOptions {
     cors?: boolean;
     sid?: string;
     params?: any;
 }
 
-interface ChannelOptions {
+export interface ChannelOptions {
     onMessage?: (_e: string, payload: any, ref?: number, p_joinRef?: number) => any;
 }
 
@@ -78,13 +80,23 @@ class Events {
     }
 }
 
+enum SocketStateEnum {
+    DISCONNECTED = 0,
+    CONNECTING = 2,
+    CONNECTED = 3,
+    DISCONNECTING = 4,
+    ERRORED = 5,
+}
+
 /**
  * Interface de comunicação com o servidor
  */
-class Socket extends Events {
+export class Socket extends Events {
 
     private ref = 1;
+    private state: SocketStateEnum;
     private connected = false;
+    private disconnectIdleTimer: any;
     private readonly channels: Channel[] = [];
     private readonly sendBuffer: Array<() => void> = [];
     private readonly transport: TransportSSE;
@@ -93,15 +105,18 @@ class Socket extends Events {
     private readonly sessionStorage: Storage;
     private readonly rejoinInterval: number[];
     private readonly reconnectInterval: number[];
+    private readonly disconnectIdleTimeout: number;
 
     constructor(endpoint: string, options: SocketOptions = {}) {
         super();
 
+        this.state = SocketStateEnum.DISCONNECTED;
         this.endpoint = endpoint;
         this.timeout = options.timeout || 30000;
+        this.sessionStorage = options.sessionStorage || (window.sessionStorage);
         this.rejoinInterval = options.rejoinInterval || [1000, 2000, 5000, 10000];
         this.reconnectInterval = options.reconnectInterval || [10, 50, 100, 150, 200, 250, 500, 1000, 2000, 5000];
-        this.sessionStorage = options.sessionStorage || (window.sessionStorage);
+        this.disconnectIdleTimeout = options.disconnectIdleTimeout || 5000;
 
         // socket id per browser tab
         let sid = this.getSession("chain:sid");
@@ -133,14 +148,22 @@ class Socket extends Events {
     }
 
     isConnected() {
-        return this.connected;
+        return this.state == SocketStateEnum.CONNECTED;
     }
 
     connect() {
+        if (this.state == SocketStateEnum.CONNECTED || this.state == SocketStateEnum.CONNECTING) {
+            return
+        }
+        this.state = SocketStateEnum.CONNECTING;
         return this.transport.connect();
     }
 
-    disconnect(callback: any, code: any, reason: any) {
+    disconnect() {
+        if (this.state == SocketStateEnum.DISCONNECTED || this.state == SocketStateEnum.DISCONNECTING || this.state == SocketStateEnum.ERRORED) {
+            return
+        }
+        this.state = SocketStateEnum.DISCONNECTING;
         this.transport.close();
     }
 
@@ -152,16 +175,28 @@ class Socket extends Events {
      * @param options 
      * @returns 
      */
-    channel(topic: string, params: any = {}, options: any = {}): Channel {
+    channel(topic: string, params: any = {}, options: ChannelOptions = {}): Channel {
+        if (!this.isConnected()) {
+            this.connect();
+        }
         let channel = new Channel(topic, params, this, options);
         this.channels.push(channel);
+        if (this.disconnectIdleTimer) {
+            clearTimeout(this.disconnectIdleTimer);
+        }
         return channel;
     }
 
-    remove(channel: any) {
+    remove(channel: Channel) {
         let idx = this.channels.indexOf(channel);
         if (idx >= 0) {
             this.channels.splice(idx, 1);
+            if (this.channels.length == 0) {
+                this.disconnectIdleTimer = setTimeout(() => {
+                    this.disconnect();
+                    this.disconnectIdleTimer = undefined;
+                }, this.disconnectIdleTimeout);
+            }
         }
     }
 
@@ -178,7 +213,7 @@ class Socket extends Events {
     push(message: Message) {
         let { topic, event, payload, ref, joinRef } = message;
         const data = encode(message);
-        if (this.connected) {
+        if (this.state == SocketStateEnum.CONNECTED) {
             log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload);
             this.transport.send(data);
         } else {
@@ -207,7 +242,7 @@ class Socket extends Events {
     private onConnOpen() {
         log(SOCKET, 'connected to %s', this.endpoint);
 
-        this.connected = true;
+        this.state = SocketStateEnum.CONNECTED;
 
         if (this.sendBuffer.length > 0) {
             // flush send buffer
@@ -219,7 +254,7 @@ class Socket extends Events {
     }
 
     private onConnClose(event: any) {
-        this.connected = false;
+        this.state = SocketStateEnum.DISCONNECTED;
         this.emit('close');
     }
 
@@ -238,11 +273,12 @@ class Socket extends Events {
     }
 
     private onConnError(error: any) {
+        this.state = SocketStateEnum.ERRORED;
         this.emit('error', error);
     }
 }
 
-class Channel extends Events {
+export class Channel extends Events {
 
     private topic: string;
     private socket: Socket
@@ -389,7 +425,7 @@ class Channel extends Events {
       * @param p_timeout 
       * @returns 
       */
-    leave(p_timeout = this.timeout) {
+    leave(p_timeout = this.timeout): Push {
         this.rejoinRetry.reset();
         this.joinPush.cancelTimeout();
 
@@ -500,7 +536,7 @@ class Channel extends Events {
 /**
  * a Push event
  */
-class Push {
+export class Push {
 
     private ref?: number;
     private sent: boolean;
@@ -614,7 +650,7 @@ class Push {
 /**
  * Channel transport using server-sent events
  */
-class TransportSSE extends Events {
+export class TransportSSE extends Events {
 
     private source: EventSource;
     private readonly options: TransportOptions;
@@ -674,7 +710,7 @@ class TransportSSE extends Events {
 /**
  * Timer to retry callback
  */
-class Retry {
+export class Retry {
     private tries = 0;
     private timeout: any;
     private readonly callback: (...args: any) => void;
@@ -742,38 +778,22 @@ function parseUrl(endpoint: string, suffix: string, params?: { [key: string]: an
     return basePath;
 }
 
-const Chain: {
-    Socket: typeof Socket;
-    Transport: { SSE: typeof TransportSSE };
-    Retry: typeof Retry;
-    Events: typeof Events;
-    Push: typeof Push;
-    Channel: typeof Channel;
-    Encode: typeof encode;
-    Decode: typeof decode;
+export const Transport = { SSE: typeof TransportSSE }
+
+export const Options: {
     Debug: boolean;
-    log: (group: string, template: string, ...params: any) => void
     [key: string]: any
 } = {
-    Socket: Socket,
-    Transport: { SSE: TransportSSE },
-    Retry: Retry,
-    Events: Events,
-    Push: Push,
-    Channel: Channel,
-    Encode: encode,
-    Decode: decode,
-    Debug: true,
-    log: log
+    Debug: false,
 }
 
-function encode(message: Message): string {
+export function encode(message: Message): string {
     let { joinRef, ref, topic, event, payload } = message;
     let s = JSON.stringify([MessageKindEnum.PUSH, joinRef, ref, topic, event, payload]);
     return s.substr(1, s.length - 2);
 }
 
-function decode(rawMessage: string): Message {
+export function decode(rawMessage: string): Message {
     // Push      = [kind, joinRef, ref,  topic, event, payload]
     // Reply     = [kind, joinRef, ref, status,        payload]
     // Broadcast = [kind,                topic, event, payload]
@@ -793,11 +813,11 @@ function decode(rawMessage: string): Message {
 
 let logGroupLen = Math.max(TRANSPORT.length, CHANNEL.length, SOCKET.length);
 
-function log(group: string, template: string, ...params: any) {
-    if (typeof group === 'string' && Chain[`Debug${group}`] === false) {
+export function log(group: string, template: string, ...params: any) {
+    if (typeof group === 'string' && Options[`Debug${group}`] === false) {
         return;
     }
-    if (Chain.Debug || (typeof group === 'string' && Chain[`Debug${group}`])) {
+    if (Options.Debug || (typeof group === 'string' && Options[`Debug${group}`])) {
         if (typeof template !== 'string') {
             params = [template, ...params];
             template = '';
@@ -815,5 +835,3 @@ function log(group: string, template: string, ...params: any) {
         );
     }
 }
-
-export default Chain

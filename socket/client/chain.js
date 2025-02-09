@@ -45,12 +45,22 @@ class Events {
         };
     }
 }
+var SocketStateEnum;
+(function (SocketStateEnum) {
+    SocketStateEnum[SocketStateEnum["DISCONNECTED"] = 0] = "DISCONNECTED";
+    SocketStateEnum[SocketStateEnum["CONNECTING"] = 2] = "CONNECTING";
+    SocketStateEnum[SocketStateEnum["CONNECTED"] = 3] = "CONNECTED";
+    SocketStateEnum[SocketStateEnum["DISCONNECTING"] = 4] = "DISCONNECTING";
+    SocketStateEnum[SocketStateEnum["ERRORED"] = 5] = "ERRORED";
+})(SocketStateEnum || (SocketStateEnum = {}));
 /**
  * Interface de comunicação com o servidor
  */
-class Socket extends Events {
+export class Socket extends Events {
     ref = 1;
+    state;
     connected = false;
+    disconnectIdleTimer;
     channels = [];
     sendBuffer = [];
     transport;
@@ -59,13 +69,16 @@ class Socket extends Events {
     sessionStorage;
     rejoinInterval;
     reconnectInterval;
+    disconnectIdleTimeout;
     constructor(endpoint, options = {}) {
         super();
+        this.state = SocketStateEnum.DISCONNECTED;
         this.endpoint = endpoint;
         this.timeout = options.timeout || 30000;
+        this.sessionStorage = options.sessionStorage || (window.sessionStorage);
         this.rejoinInterval = options.rejoinInterval || [1000, 2000, 5000, 10000];
         this.reconnectInterval = options.reconnectInterval || [10, 50, 100, 150, 200, 250, 500, 1000, 2000, 5000];
-        this.sessionStorage = options.sessionStorage || (window.sessionStorage);
+        this.disconnectIdleTimeout = options.disconnectIdleTimeout || 5000;
         // socket id per browser tab
         let sid = this.getSession("chain:sid");
         if (sid == null) {
@@ -90,12 +103,20 @@ class Socket extends Events {
         return this.rejoinInterval;
     }
     isConnected() {
-        return this.connected;
+        return this.state == SocketStateEnum.CONNECTED;
     }
     connect() {
+        if (this.state == SocketStateEnum.CONNECTED || this.state == SocketStateEnum.CONNECTING) {
+            return;
+        }
+        this.state = SocketStateEnum.CONNECTING;
         return this.transport.connect();
     }
-    disconnect(callback, code, reason) {
+    disconnect() {
+        if (this.state == SocketStateEnum.DISCONNECTED || this.state == SocketStateEnum.DISCONNECTING || this.state == SocketStateEnum.ERRORED) {
+            return;
+        }
+        this.state = SocketStateEnum.DISCONNECTING;
         this.transport.close();
     }
     /**
@@ -107,14 +128,26 @@ class Socket extends Events {
      * @returns
      */
     channel(topic, params = {}, options = {}) {
+        if (!this.isConnected()) {
+            this.connect();
+        }
         let channel = new Channel(topic, params, this, options);
         this.channels.push(channel);
+        if (this.disconnectIdleTimer) {
+            clearTimeout(this.disconnectIdleTimer);
+        }
         return channel;
     }
     remove(channel) {
         let idx = this.channels.indexOf(channel);
         if (idx >= 0) {
             this.channels.splice(idx, 1);
+            if (this.channels.length == 0) {
+                this.disconnectIdleTimer = setTimeout(() => {
+                    this.disconnect();
+                    this.disconnectIdleTimer = undefined;
+                }, this.disconnectIdleTimeout);
+            }
         }
     }
     leaveOpenTopic(topic) {
@@ -129,7 +162,7 @@ class Socket extends Events {
     push(message) {
         let { topic, event, payload, ref, joinRef } = message;
         const data = encode(message);
-        if (this.connected) {
+        if (this.state == SocketStateEnum.CONNECTED) {
             log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload);
             this.transport.send(data);
         }
@@ -155,7 +188,7 @@ class Socket extends Events {
     }
     onConnOpen() {
         log(SOCKET, 'connected to %s', this.endpoint);
-        this.connected = true;
+        this.state = SocketStateEnum.CONNECTED;
         if (this.sendBuffer.length > 0) {
             // flush send buffer
             this.sendBuffer.forEach(callback => callback());
@@ -164,7 +197,7 @@ class Socket extends Events {
         this.emit('open');
     }
     onConnClose(event) {
-        this.connected = false;
+        this.state = SocketStateEnum.DISCONNECTED;
         this.emit('close');
     }
     onConnMessage(data) {
@@ -177,10 +210,11 @@ class Socket extends Events {
         this.emit('message', message);
     }
     onConnError(error) {
+        this.state = SocketStateEnum.ERRORED;
         this.emit('error', error);
     }
 }
-class Channel extends Events {
+export class Channel extends Events {
     topic;
     socket;
     state;
@@ -400,7 +434,7 @@ class Channel extends Events {
 /**
  * a Push event
  */
-class Push {
+export class Push {
     ref;
     sent;
     timer;
@@ -500,7 +534,7 @@ class Push {
 /**
  * Channel transport using server-sent events
  */
-class TransportSSE extends Events {
+export class TransportSSE extends Events {
     source;
     options;
     endpoint;
@@ -551,7 +585,7 @@ class TransportSSE extends Events {
 /**
  * Timer to retry callback
  */
-class Retry {
+export class Retry {
     tries = 0;
     timeout;
     callback;
@@ -612,24 +646,16 @@ function parseUrl(endpoint, suffix, params) {
     }
     return basePath;
 }
-const Chain = {
-    Socket: Socket,
-    Transport: { SSE: TransportSSE },
-    Retry: Retry,
-    Events: Events,
-    Push: Push,
-    Channel: Channel,
-    Encode: encode,
-    Decode: decode,
-    Debug: true,
-    log: log
+export const Transport = { SSE: typeof TransportSSE };
+export const Options = {
+    Debug: false,
 };
-function encode(message) {
+export function encode(message) {
     let { joinRef, ref, topic, event, payload } = message;
     let s = JSON.stringify([MessageKindEnum.PUSH, joinRef, ref, topic, event, payload]);
     return s.substr(1, s.length - 2);
 }
-function decode(rawMessage) {
+export function decode(rawMessage) {
     // Push      = [kind, joinRef, ref,  topic, event, payload]
     // Reply     = [kind, joinRef, ref, status,        payload]
     // Broadcast = [kind,                topic, event, payload]
@@ -648,11 +674,11 @@ function decode(rawMessage) {
     return { joinRef, ref, topic, event, payload, kind };
 }
 let logGroupLen = Math.max(TRANSPORT.length, CHANNEL.length, SOCKET.length);
-function log(group, template, ...params) {
-    if (typeof group === 'string' && Chain[`Debug${group}`] === false) {
+export function log(group, template, ...params) {
+    if (typeof group === 'string' && Options[`Debug${group}`] === false) {
         return;
     }
-    if (Chain.Debug || (typeof group === 'string' && Chain[`Debug${group}`])) {
+    if (Options.Debug || (typeof group === 'string' && Options[`Debug${group}`])) {
         if (typeof template !== 'string') {
             params = [template, ...params];
             template = '';
@@ -665,5 +691,4 @@ function log(group, template, ...params) {
         console.log(`${`                           ${group}`.substr(-logGroupLen)}: ${template}`, ...params);
     }
 }
-export default Chain;
 //# sourceMappingURL=chain.js.map

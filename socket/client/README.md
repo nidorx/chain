@@ -4,5 +4,5 @@
 
 ```
 npm install -g typescript
-tsc chain.ts
+npx tsc
 ```
