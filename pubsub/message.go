@@ -1,22 +1,22 @@
 package pubsub
 
-// messageType is an integer ID of a type of message that can be received on network channels from other members.
-type messageType uint8
+// MessageType is an integer ID of a type of message that can be received on network channels from other members.
+type MessageType uint8
 
 // The list of available message types.
 const (
-	messageTypeCompress messageType = iota
-	messageTypeEncrypt
-	messageTypeBroadcast
-	messageTypeDirectBroadcast
-	indirectPingMsg
-	ackRespMsg
-	suspectMsg
-	aliveMsg
-	deadMsg
-	pushPullMsg
-	compoundMsg
-	userMsg
-	nackRespMsg
-	errMsg
+	MessageTypeCompress MessageType = iota
+	MessageTypeEncrypt
+	MessageTypeBroadcast
+	MessageTypeDirectBroadcast
+	IndirectPingMsg
+	AckRespMsg
+	SuspectMsg
+	AliveMsg
+	DeadMsg
+	PushPullMsg
+	CompoundMsg
+	UserMsg
+	NackRespMsg
+	ErrMsg
 )

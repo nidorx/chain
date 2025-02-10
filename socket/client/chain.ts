@@ -1,7 +1,5 @@
 /**
- * Client do serviço de mensageria do papo
- * 
- * Versão modificada do https://github.com/nidorx/chain/tree/main/socket/client
+ * Based on https://github.com/phoenixframework/phoenix/tree/main/assets/js/phoenix
  */
 const SOCKET = 'Socket';
 const CHANNEL = 'Channel';
@@ -12,7 +10,6 @@ enum MessageKindEnum {
     REPLY = 1,
     BROADCAST = 2
 }
-
 
 enum ChannelStateEnum {
     CLOSED = 0,
@@ -89,13 +86,12 @@ enum SocketStateEnum {
 }
 
 /**
- * Interface de comunicação com o servidor
+ * Initializes the Socket
  */
 export class Socket extends Events {
 
     private ref = 1;
-    private state: SocketStateEnum;
-    private connected = false;
+    private state: SocketStateEnum;    
     private disconnectIdleTimer: any;
     private readonly channels: Channel[] = [];
     private readonly sendBuffer: Array<() => void> = [];
@@ -103,8 +99,7 @@ export class Socket extends Events {
     private readonly timeout: number;
     private readonly endpoint: string;
     private readonly sessionStorage: Storage;
-    private readonly rejoinInterval: number[];
-    private readonly reconnectInterval: number[];
+    private readonly rejoinInterval: number[];    
     private readonly disconnectIdleTimeout: number;
 
     constructor(endpoint: string, options: SocketOptions = {}) {
@@ -114,8 +109,7 @@ export class Socket extends Events {
         this.endpoint = endpoint;
         this.timeout = options.timeout || 30000;
         this.sessionStorage = options.sessionStorage || (window.sessionStorage);
-        this.rejoinInterval = options.rejoinInterval || [1000, 2000, 5000, 10000];
-        this.reconnectInterval = options.reconnectInterval || [10, 50, 100, 150, 200, 250, 500, 1000, 2000, 5000];
+        this.rejoinInterval = options.rejoinInterval || [1000, 2000, 5000, 10000];        
         this.disconnectIdleTimeout = options.disconnectIdleTimeout || 5000;
 
         // socket id per browser tab
@@ -254,6 +248,7 @@ export class Socket extends Events {
     }
 
     private onConnClose(event: any) {
+        log(SOCKET, 'closed');
         this.state = SocketStateEnum.DISCONNECTED;
         this.emit('close');
     }
@@ -298,22 +293,23 @@ export class Channel extends Events {
         super();
 
         this.topic = topic;
+        this.state = ChannelStateEnum.CLOSED;
         this.socket = socket;
         this.timeout = socket.getTimeout();
-        this.state = ChannelStateEnum.CLOSED;
         this.onMessage = options.onMessage ? options.onMessage : (_e: string, payload: any) => payload;
 
-        this.rejoinRetry = new Retry(() => {
+        this.rejoinRetry = new Retry(() => {            
             if (socket.isConnected()) {
                 this.rejoin();
             }
         }, socket.getRejoinInterval());
 
-        const cancelOnSocketError = socket.on('error', () => {
+        const cancelOnSocketError = socket.on('error', () => {            
+            this.state = ChannelStateEnum.ERRORED;
             this.rejoinRetry.reset();
         });
 
-        const cancelOnSocketOpen = socket.on('open', () => {
+        const cancelOnSocketOpen = socket.on('open', () => {            
             this.rejoinRetry.reset();
             if (this.isErrored()) {
                 this.rejoin();
@@ -784,20 +780,19 @@ export const Options: {
     Debug: boolean;
     [key: string]: any
 } = {
-    Debug: false,
+    Debug: true,
 }
 
 export function encode(message: Message): string {
-    let { joinRef, ref, topic, event, payload } = message;
-    let s = JSON.stringify([MessageKindEnum.PUSH, joinRef, ref, topic, event, payload]);
-    return s.substr(1, s.length - 2);
+    let { joinRef, ref, topic, event, payload } = message;    
+    return JSON.stringify([MessageKindEnum.PUSH, joinRef, ref, topic, event, payload]);
 }
 
 export function decode(rawMessage: string): Message {
     // Push      = [kind, joinRef, ref,  topic, event, payload]
     // Reply     = [kind, joinRef, ref, status,        payload]
     // Broadcast = [kind,                topic, event, payload]
-    let [kind, joinRef, ref, topic, event, payload] = JSON.parse(`[${rawMessage}]`);
+    let [kind, joinRef, ref, topic, event, payload] = JSON.parse(rawMessage);
     if (kind === MessageKindEnum.REPLY) {
         payload = { status: topic === 0 ? 'ok' : 'error', response: event };
         event = '_reply';

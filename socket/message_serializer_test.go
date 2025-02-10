@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-//func Test_MessageSerializer_Encode(t *testing.T) {
-//
-//}
-
 func Test_Socket_MessageSerializer_Decode(t *testing.T) {
 
 	serializer := &MessageSerializer{}
@@ -20,18 +16,18 @@ func Test_Socket_MessageSerializer_Decode(t *testing.T) {
 		expected Message
 	}{
 		// Push 		= [kind, joinRef, ref, topic, event, payload]
-		{`0,2,3,"room:1234","_join",{"param1":"foo"}`, "", Message{JoinRef: 2, Ref: 3, Topic: "room:1234", Event: "_join", Payload: map[string]any{"param1": "foo"}}},
-		{`0,2,3,"room:1234","_join"`, "", Message{JoinRef: 2, Ref: 3, Topic: "room:1234", Event: "_join"}},
-		{`0,2,3,"","_join",{"param1":"foo"}`, "", Message{JoinRef: 2, Ref: 3, Event: "_join", Payload: map[string]any{"param1": "foo"}}},
-		{`0,2,3,"room:1234","",{"param1":"foo"}`, "", Message{JoinRef: 2, Ref: 3, Topic: "room:1234", Payload: map[string]any{"param1": "foo"}}},
-		{`0,2,3,"","",{"param1":"foo","param2":"\"a\" \\{}}}"}`, "", Message{JoinRef: 2, Ref: 3, Payload: map[string]any{"param1": "foo", "param2": `"a" \{}}}`}}},
-		{`0,2,4,"room:1234","_leave",{}`, "", Message{JoinRef: 2, Ref: 4, Topic: "room:1234", Event: "_leave", Payload: map[string]any{}}},
-		{`0,2,4,"","",{}`, "", Message{JoinRef: 2, Ref: 4, Payload: map[string]any{}}},
-		{`0,2,4,"","",[]`, "", Message{JoinRef: 2, Ref: 4, Payload: []any{}}},
-		{`0,2,4,"","",[{"param1":"foo"}]`, "", Message{JoinRef: 2, Ref: 4, Payload: []any{map[string]any{"param1": "foo"}}}},
-		{`0,2,4,"","",1`, "", Message{JoinRef: 2, Ref: 4, Payload: float64(1)}},
-		{`0,2,4,"","","string"`, "", Message{JoinRef: 2, Ref: 4, Payload: "string"}},
-		{`0,2,4,"",""`, "", Message{JoinRef: 2, Ref: 4}},
+		{`[0,2,3,"room:1234","_join",{"param1":"foo"}]`, "", Message{JoinRef: 2, Ref: 3, Topic: "room:1234", Event: "_join", Payload: map[string]any{"param1": "foo"}}},
+		{`[0,2,3,"room:1234","_join"]`, "", Message{JoinRef: 2, Ref: 3, Topic: "room:1234", Event: "_join"}},
+		{`[0,2,3,"","_join",{"param1":"foo"}]`, "", Message{JoinRef: 2, Ref: 3, Event: "_join", Payload: map[string]any{"param1": "foo"}}},
+		{`[0,2,3,"room:1234","",{"param1":"foo"}]`, "", Message{JoinRef: 2, Ref: 3, Topic: "room:1234", Payload: map[string]any{"param1": "foo"}}},
+		{`[0,2,3,"","",{"param1":"foo","param2":"\"a\" \\{}}}"}]`, "", Message{JoinRef: 2, Ref: 3, Payload: map[string]any{"param1": "foo", "param2": `"a" \{}}}`}}},
+		{`[0,2,4,"room:1234","_leave",{}]`, "", Message{JoinRef: 2, Ref: 4, Topic: "room:1234", Event: "_leave", Payload: map[string]any{}}},
+		{`[0,2,4,"","",{}]`, "", Message{JoinRef: 2, Ref: 4, Payload: map[string]any{}}},
+		{`[0,2,4,"","",[]]`, "", Message{JoinRef: 2, Ref: 4, Payload: []any{}}},
+		{`[0,2,4,"","",[{"param1":"foo"}]]`, "", Message{JoinRef: 2, Ref: 4, Payload: []any{map[string]any{"param1": "foo"}}}},
+		{`[0,2,4,"","",1]`, "", Message{JoinRef: 2, Ref: 4, Payload: float64(1)}},
+		{`[0,2,4,"","","string"]`, "", Message{JoinRef: 2, Ref: 4, Payload: "string"}},
+		{`[0,2,4,"",""]`, "", Message{JoinRef: 2, Ref: 4}},
 		// Reply 		= [kind, joinRef, ref, topic,        payload]
 		// Broadcast 	= [kind,               topic, event, payload]
 	}

@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/nidorx/chain"
 	"github.com/nidorx/chain/pubsub"
-	"time"
 )
 
 type MyDispatcher struct {
 }
 
-func (d *MyDispatcher) Dispatch(topic string, message any, from string) {
+func (d *MyDispatcher) Dispatch(topic string, message []byte, from string) {
 	println(fmt.Sprintf("New Message. Topic: %s, Content: %s", topic, message))
 }
 

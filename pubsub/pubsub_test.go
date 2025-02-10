@@ -1,12 +1,13 @@
 package pubsub
 
 import (
-	"github.com/nidorx/chain"
-	"github.com/segmentio/ksuid"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/nidorx/chain"
+	"github.com/segmentio/ksuid"
 )
 
 var (
@@ -197,7 +198,7 @@ type testDispatcherStruct struct {
 	mutex    sync.Mutex
 }
 
-func (d *testDispatcherStruct) Dispatch(topic string, message any, from string) {
+func (d *testDispatcherStruct) Dispatch(topic string, message []byte, from string) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	d.messages = append(d.messages, &testDispatcherMessage{topic, message, from})

@@ -23,7 +23,7 @@ func compressPayload(payload []byte) ([]byte, error) {
 
 	// Create a compressed message
 	buf := bytes.NewBuffer(nil)
-	buf.WriteByte(byte(messageTypeCompress))
+	buf.WriteByte(byte(MessageTypeCompress))
 	buf.Write(buffer.Bytes())
 	return buf.Bytes(), nil
 }

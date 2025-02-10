@@ -2,13 +2,14 @@ package pubsub
 
 import (
 	"bytes"
+
 	"github.com/nidorx/chain"
 	"github.com/nidorx/chain/crypto"
 )
 
 var globalKeyring = chain.NewKeyring("chain.pubsub.keyring.salt", 1000, 32, "sha256")
 
-var aad = append([]byte{byte(messageTypeEncrypt)}, []byte("chain.pubsub.aad")...)
+var aad = append([]byte{byte(MessageTypeEncrypt)}, []byte("chain.pubsub.aad")...)
 
 // encryptPayload is used to encrypt a message before sending
 func encryptPayload(keyring *crypto.Keyring, payload []byte) ([]byte, error) {
@@ -19,7 +20,7 @@ func encryptPayload(keyring *crypto.Keyring, payload []byte) ([]byte, error) {
 
 	// return encrypted cipher text
 	buf := bytes.NewBuffer(nil)
-	buf.WriteByte(byte(messageTypeEncrypt))
+	buf.WriteByte(byte(MessageTypeEncrypt))
 	buf.Write(encrypted)
 	return buf.Bytes(), nil
 }

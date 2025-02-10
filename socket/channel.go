@@ -1,6 +1,7 @@
 package socket
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -144,11 +145,11 @@ func (c *Channel) Leave(topic string, handler LeaveHandler) {
 
 // Broadcast on the pubsub server with the given topic, event and payload.
 func (c *Channel) Broadcast(topic string, event string, payload any) (err error) {
-	broadcast := newMessage(MessageTypeBroadcast, topic, event, payload)
-	defer deleteMessage(broadcast)
+	message := newMessage(MessageTypeBroadcast, topic, event, payload)
+	defer deleteMessage(message)
 
 	var bytes []byte
-	if bytes, err = c.serializer.Encode(broadcast); err != nil {
+	if bytes, err = c.serializer.Encode(message); err != nil {
 		return
 	}
 	err = pubsub.Broadcast(topic, bytes)
@@ -157,35 +158,58 @@ func (c *Channel) Broadcast(topic string, event string, payload any) (err error)
 
 // LocalBroadcast on the pubsub server with the given topic, event and payload.
 func (c *Channel) LocalBroadcast(topic string, event string, payload any) (err error) {
-	broadcast := newMessage(MessageTypeBroadcast, topic, event, payload)
-	pubsub.LocalBroadcast(topic, broadcast)
+	message := newMessage(MessageTypeBroadcast, topic, event, payload)
+	var bytes []byte
+	if bytes, err = c.serializer.Encode(message); err != nil {
+		return
+	}
+	pubsub.LocalBroadcast(topic, bytes)
 	return
 }
 
-// Dispatch Hook invoked by pubsub dispatch.
-func (c *Channel) Dispatch(topic string, msg any, from string) {
-	var message *Message
-	var valid bool
-	var payload []byte
-	isByteArray := false
-
-	if payload, valid = msg.([]byte); valid {
-		isByteArray = true
-		message = newMessageAny()
-		if _, err := c.serializer.Decode(payload, message); err != nil {
-			slog.Debug(
-				"[chain.socket] could not decode serialized data",
-				slog.Any("Error", err),
-				slog.Any("Payload", payload),
-				slog.String("Topic", topic),
+// Subscribe ma
+func (c *Channel) Subscribe(pubsubTopic, channelTopic, channelEvent string) {
+	pubsub.Subscribe(pubsubTopic, pubsub.DispatcherFunc(func(topic string, pubsubPayload []byte, from string) {
+		payload := map[string]any{}
+		if err := json.Unmarshal(pubsubPayload, &payload); err != nil {
+			slog.Warn(
+				"[chain.socket] failed to decode pubsub message",
+				slog.Any("error", err),
+				slog.String("from", from),
+				slog.String("event", channelEvent),
+				slog.String("pubsubTopic", pubsubTopic),
+				slog.String("topic", topic),
+				slog.String("message", string(pubsubPayload)),
 			)
-
-			deleteMessage(message)
 			return
 		}
-	} else if message, valid = msg.(*Message); !valid {
+
+		message := newMessage(MessageTypeBroadcast, channelTopic, channelEvent, payload)
+		c.dispatch(channelTopic, message, from)
+	}))
+}
+
+// Dispatch Hook invoked by pubsub dispatch.
+func (c *Channel) Dispatch(topic string, channelMessageEncoded []byte, from string) {
+	var message = newMessageAny()
+
+	if _, err := c.serializer.Decode(channelMessageEncoded, message); err != nil {
+		slog.Debug(
+			"[chain.socket] could not decode serialized data",
+			slog.Any("Error", err),
+			slog.String("topic", topic),
+			slog.String("from", from),
+		)
+		deleteMessage(message)
 		return
 	}
+
+	c.dispatch(topic, message, from)
+}
+
+func (c *Channel) dispatch(topic string, message *Message, from string) {
+
+	defer deleteMessage(message)
 
 	// get sockets
 	c.socketsMutex.RLock()
@@ -216,15 +240,13 @@ func (c *Channel) Dispatch(topic string, msg any, from string) {
 
 	// fastlane (not intercepted, single encode for all sockets)
 
-	if !isByteArray {
-		var err error
-		if payload, err = c.serializer.Encode(message); err != nil {
-			return
-		}
+	encoded, err := c.serializer.Encode(message)
+	if err != nil {
+		return
 	}
 
 	for _, socket := range sockets {
-		socket.Send(payload)
+		socket.Send(encoded)
 	}
 }
 

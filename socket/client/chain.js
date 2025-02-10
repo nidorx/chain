@@ -1,7 +1,5 @@
 /**
- * Client do serviço de mensageria do papo
- *
- * Versão modificada do https://github.com/nidorx/chain/tree/main/socket/client
+ * Based on https://github.com/phoenixframework/phoenix/tree/main/assets/js/phoenix
  */
 const SOCKET = 'Socket';
 const CHANNEL = 'Channel';
@@ -54,12 +52,11 @@ var SocketStateEnum;
     SocketStateEnum[SocketStateEnum["ERRORED"] = 5] = "ERRORED";
 })(SocketStateEnum || (SocketStateEnum = {}));
 /**
- * Interface de comunicação com o servidor
+ * Initializes the Socket
  */
 export class Socket extends Events {
     ref = 1;
     state;
-    connected = false;
     disconnectIdleTimer;
     channels = [];
     sendBuffer = [];
@@ -68,7 +65,6 @@ export class Socket extends Events {
     endpoint;
     sessionStorage;
     rejoinInterval;
-    reconnectInterval;
     disconnectIdleTimeout;
     constructor(endpoint, options = {}) {
         super();
@@ -77,7 +73,6 @@ export class Socket extends Events {
         this.timeout = options.timeout || 30000;
         this.sessionStorage = options.sessionStorage || (window.sessionStorage);
         this.rejoinInterval = options.rejoinInterval || [1000, 2000, 5000, 10000];
-        this.reconnectInterval = options.reconnectInterval || [10, 50, 100, 150, 200, 250, 500, 1000, 2000, 5000];
         this.disconnectIdleTimeout = options.disconnectIdleTimeout || 5000;
         // socket id per browser tab
         let sid = this.getSession("chain:sid");
@@ -197,6 +192,7 @@ export class Socket extends Events {
         this.emit('open');
     }
     onConnClose(event) {
+        log(SOCKET, 'closed');
         this.state = SocketStateEnum.DISCONNECTED;
         this.emit('close');
     }
@@ -230,9 +226,9 @@ export class Channel extends Events {
     constructor(topic, params, socket, options) {
         super();
         this.topic = topic;
+        this.state = ChannelStateEnum.CLOSED;
         this.socket = socket;
         this.timeout = socket.getTimeout();
-        this.state = ChannelStateEnum.CLOSED;
         this.onMessage = options.onMessage ? options.onMessage : (_e, payload) => payload;
         this.rejoinRetry = new Retry(() => {
             if (socket.isConnected()) {
@@ -240,6 +236,7 @@ export class Channel extends Events {
             }
         }, socket.getRejoinInterval());
         const cancelOnSocketError = socket.on('error', () => {
+            this.state = ChannelStateEnum.ERRORED;
             this.rejoinRetry.reset();
         });
         const cancelOnSocketOpen = socket.on('open', () => {
@@ -648,18 +645,17 @@ function parseUrl(endpoint, suffix, params) {
 }
 export const Transport = { SSE: typeof TransportSSE };
 export const Options = {
-    Debug: false,
+    Debug: true,
 };
 export function encode(message) {
     let { joinRef, ref, topic, event, payload } = message;
-    let s = JSON.stringify([MessageKindEnum.PUSH, joinRef, ref, topic, event, payload]);
-    return s.substr(1, s.length - 2);
+    return JSON.stringify([MessageKindEnum.PUSH, joinRef, ref, topic, event, payload]);
 }
 export function decode(rawMessage) {
     // Push      = [kind, joinRef, ref,  topic, event, payload]
     // Reply     = [kind, joinRef, ref, status,        payload]
     // Broadcast = [kind,                topic, event, payload]
-    let [kind, joinRef, ref, topic, event, payload] = JSON.parse(`[${rawMessage}]`);
+    let [kind, joinRef, ref, topic, event, payload] = JSON.parse(rawMessage);
     if (kind === MessageKindEnum.REPLY) {
         payload = { status: topic === 0 ? 'ok' : 'error', response: event };
         event = '_reply';

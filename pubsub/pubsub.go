@@ -22,21 +22,21 @@ var (
 )
 
 type Dispatcher interface {
-	Dispatch(topic string, message any, from string)
+	Dispatch(topic string, message []byte, from string)
 }
 
 type DispatcherFuncImpl struct {
-	Dispatcher func(topic string, message any, from string)
+	Dispatcher func(topic string, message []byte, from string)
 }
 
-func (d *DispatcherFuncImpl) Dispatch(topic string, message any, from string) {
+func (d *DispatcherFuncImpl) Dispatch(topic string, message []byte, from string) {
 	if d.Dispatcher == nil {
 		return
 	}
 	d.Dispatcher(topic, message, from)
 }
 
-func DispatcherFunc(d func(topic string, message any, from string)) Dispatcher {
+func DispatcherFunc(d func(topic string, message []byte, from string)) Dispatcher {
 	return &DispatcherFuncImpl{Dispatcher: d}
 }
 
@@ -122,7 +122,7 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	msgToSend := message
 
 	// [messageType: byte] [from: 20 bytes] [msgToSend: ...]
-	msgToSend = append(append([]byte{byte(messageTypeBroadcast)}, selfIdBytes...), msgToSend...)
+	msgToSend = append(append([]byte{byte(MessageTypeBroadcast)}, selfIdBytes...), msgToSend...)
 
 	// Check if we have compression enabled
 	if config.DisableCompression == false {
@@ -178,11 +178,11 @@ func DirectBroadcast(nodeId string, topic string, message []byte, options ...*Op
 	buf.WriteString(topic)
 	buf.Write(message)
 
-	return broadcastMessage(messageTypeDirectBroadcast, "direct:"+nodeId, buf.Bytes(), options...)
+	return broadcastMessage(MessageTypeDirectBroadcast, "direct:"+nodeId, buf.Bytes(), options...)
 }
 
 // Broadcast broadcasts message on given topic across the whole cluster.
-func broadcastMessage(msgType messageType, topic string, message []byte, options ...*Option) (err error) {
+func broadcastMessage(msgType MessageType, topic string, message []byte, options ...*Option) (err error) {
 	var config *AdapterConfig
 	if config = GetAdapter(topic); config == nil {
 		return ErrNoAdapter
@@ -210,7 +210,7 @@ func broadcastMessage(msgType messageType, topic string, message []byte, options
 	msgToSend := buf.Bytes()
 
 	// Check if we have compression enabled
-	if config.DisableCompression == false {
+	if !config.DisableCompression {
 		var compressed []byte
 		if compressed, err = compressPayload(msgToSend); err != nil {
 			slog.Warn(
@@ -224,7 +224,7 @@ func broadcastMessage(msgType messageType, topic string, message []byte, options
 	}
 
 	// Check if we have encryption enabled
-	if config.DisableEncryption == false {
+	if !config.DisableEncryption {
 		keyring := config.Keyring
 		if keyring == nil {
 			keyring = globalKeyring
@@ -245,10 +245,10 @@ func broadcastMessage(msgType messageType, topic string, message []byte, options
 func Dispatch(topic string, message []byte) {
 	if config := GetAdapter(topic); config != nil {
 		// Read the message type
-		msgType := messageType(message[0])
+		msgType := MessageType(message[0])
 
 		// Check if the message is encrypted
-		if msgType == messageTypeEncrypt {
+		if msgType == MessageTypeEncrypt {
 			if config.DisableEncryption {
 				slog.Error(
 					"[chain.pubsub] remote message is encrypted and encryption is not configured",
@@ -274,9 +274,9 @@ func Dispatch(topic string, message []byte) {
 			}
 
 			// Reset message type and buf
-			msgType = messageType(plain[0])
+			msgType = MessageType(plain[0])
 			message = plain
-		} else if config.DisableEncryption == false {
+		} else if !config.DisableEncryption {
 			slog.Error(
 				"[chain.pubsub] encryption is configured but remote message is not encrypted",
 				slog.String("Topic", topic),
@@ -286,7 +286,7 @@ func Dispatch(topic string, message []byte) {
 		}
 
 		// Check if we have a compressed message
-		if msgType == messageTypeCompress {
+		if msgType == MessageTypeCompress {
 			decompressed, err := decompressPayload(message)
 			if err != nil {
 				slog.Error(
@@ -299,7 +299,7 @@ func Dispatch(topic string, message []byte) {
 			}
 
 			// Reset message type and buf
-			msgType = messageType(decompressed[0])
+			msgType = MessageType(decompressed[0])
 			message = decompressed
 		}
 
@@ -334,7 +334,7 @@ func Dispatch(topic string, message []byte) {
 		message = message[20:]
 
 		// Check if is a direct broadcast
-		if msgType == messageTypeDirectBroadcast {
+		if msgType == MessageTypeDirectBroadcast {
 			if topic != directTopic {
 				slog.Error(
 					"[chain.pubsub] invalid topic for remote direct broadcast message",
@@ -379,7 +379,7 @@ func Dispatch(topic string, message []byte) {
 			}
 			topic = string(message[:topicNameLen])
 			message = message[topicNameLen:]
-		} else if msgType != messageTypeBroadcast {
+		} else if msgType != MessageTypeBroadcast {
 			slog.Error(
 				"[chain.pubsub] invalid remote message type",
 				slog.String("Topic", topic),
@@ -396,7 +396,7 @@ func Dispatch(topic string, message []byte) {
 //
 // `topic` - The topic to broadcast to, ie: `"users:123"`
 // `message` - The payload of the broadcast
-func LocalBroadcast(topic string, message any) {
+func LocalBroadcast(topic string, message []byte) {
 	dispatchMessage(topic, message, selfIdString)
 }
 
@@ -480,7 +480,7 @@ func scheduleUnsubscribe(topic string) {
 }
 
 // dispatchMessage deliver the message locally
-func dispatchMessage(topic string, message any, from string) {
+func dispatchMessage(topic string, message []byte, from string) {
 	go func() {
 		if from == "" {
 			from = selfIdString
