@@ -42,17 +42,20 @@ type Context struct {
 
 // Set define um valor compartilhado no contexto de execução da requisição
 func (ctx *Context) Set(key any, value any) {
-	if ctx.data == nil {
-		ctx.data = make(map[any]any)
+	if ctx.parent != nil {
+		ctx.parent.Set(key, value)
+	} else {
+		if ctx.data == nil {
+			ctx.data = make(map[any]any)
+		}
+		ctx.data[key] = value
 	}
-	ctx.data[key] = value
 }
 
 // Get obtém um valor compartilhado no contexto de execução da requisição
 func (ctx *Context) Get(key any) (any, bool) {
 	if ctx.data != nil {
-		value, exists := ctx.data[key]
-		if exists {
+		if value, exists := ctx.data[key]; exists {
 			return value, exists
 		}
 	}

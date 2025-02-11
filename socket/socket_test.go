@@ -28,7 +28,7 @@ func (t *transportT) Configure(h *Handler, r *chain.Router, endpoint string) {
 func (t *transportT) putMessage(bytes []byte) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	message := newMessageAny()
+	message := getMessageAny()
 	_, err := t.handler.Serializer.Decode(bytes, message)
 	if err != nil {
 		t.Errors = append(t.Errors, err)
@@ -91,6 +91,9 @@ func (t *transportT) PopMessage() *Message {
 func (t *transportT) PopError() error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
+	if len(t.Errors) == 0 {
+		return nil
+	}
 	return t.Errors[0]
 }
 
@@ -176,11 +179,15 @@ func Test_Socket(t *testing.T) {
 	var ok bool
 
 	// Channel JOIN
-	request = newMessage(MessageTypePush, "chat:lobby", "_join", map[string]any{"id": "USER1"})
+	request = getMessage(MessageTypePush, "chat:lobby", "_join", map[string]any{"id": "USER1"})
 	request.Ref = 1
 	request.JoinRef = 1
 	transport.SendMessage(request)
 	time.Sleep(time.Second)
+
+	if err := transport.PopError(); err != nil {
+		t.Errorf("Join() failed: error happend: %v", err)
+	}
 
 	response = transport.PopMessage()
 	if response.Kind != MessageTypeReply {
@@ -194,7 +201,7 @@ func Test_Socket(t *testing.T) {
 	}
 
 	// Channel EVENT
-	request = newMessage(MessageTypePush, "chat:lobby", "event", map[string]any{"payload": "EVT_VAL"})
+	request = getMessage(MessageTypePush, "chat:lobby", "event", map[string]any{"payload": "EVT_VAL"})
 	request.Ref = 2
 	request.JoinRef = 1
 	transport.SendMessage(request)
@@ -243,7 +250,7 @@ func Test_Socket(t *testing.T) {
 	}
 
 	// Channel LEAVE
-	request = newMessage(MessageTypePush, "chat:lobby", "_leave", nil)
+	request = getMessage(MessageTypePush, "chat:lobby", "_leave", nil)
 	request.Ref = 3
 	request.JoinRef = 1
 	transport.SendMessage(request)

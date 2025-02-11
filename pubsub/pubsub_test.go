@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nidorx/chain"
+	"github.com/nidorx/chain/pkg"
 	"github.com/segmentio/ksuid"
 )
 
@@ -155,7 +156,7 @@ func testAsRemote(fn func()) {
 }
 
 func testClearPubsub() {
-	p.subscriptions = map[string]*subscription{}
+	p.subscriptions = &pkg.WildcardStore[*subscription]{}
 	p.unsubscribeTimers = map[string]*time.Timer{}
 
 	SetAdapters([]AdapterConfig{{

@@ -249,7 +249,7 @@ func (t *TransportSSE) newSession(handler *Handler, ctx *chain.Context, endpoint
 	if sidKey == "" {
 		sidKey = "sid"
 	}
-	sess.Put(sidKey, skt.SocketId())
+	sess.Put(sidKey, skt.Id())
 
 	return
 }

@@ -128,12 +128,14 @@ func (s *MessageSerializer) Decode(data []byte, v any) (out any, err error) {
 		return // invalid message, ignore
 	}
 
-	if len(arr) < 5 {
-		return nil, errors.New("invalid Message size")
-	}
 	if msg.Kind == MessageTypeReply {
-		msg.Payload = arr[4]
+		if len(arr) > 4 {
+			msg.Payload = arr[4]
+		}
 	} else {
+		if len(arr) < 5 {
+			return nil, errors.New("invalid Message size")
+		}
 		if value, ok := arr[4].(string); !ok {
 			return nil, errors.New("invalid Message.Event")
 		} else {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 var (
@@ -14,15 +15,26 @@ var (
 
 // WildcardStore utility to persist and search items using wildcards. Used for channels, topics and events
 //
-// IMPORTANT: It is not safe for insertion in a concurrent scenario. Items should only persist during system startup.
+// IMPORTANT: Items should only persist during system startup.
 type WildcardStore[T any] struct {
+	mutex    sync.Mutex
 	exactly  map[string]T        // exactly match (Ex. /room:lobby)
 	wildcard []*wildcardEntry[T] // wildcard match (Ex. /room:*)
 }
 
 type wildcardEntry[T any] struct {
-	prefix string
 	item   T
+	prefix string
+}
+
+// Match returns the exactly value corresponding to the first occurrence of the keyPattern that matches the given key
+func (s *WildcardStore[T]) MatchExactly(key string) (out T) {
+	if item, exist := s.exactly[key]; exist {
+		out = item
+		return
+	}
+
+	return
 }
 
 // Match returns the value corresponding to the first occurrence of the keyPattern that matches the given key
@@ -72,8 +84,11 @@ func (s *WildcardStore[T]) Insert(keyPattern string, value T) error {
 		return ErrInvalidPattern
 	}
 
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	// wildcard
-	if strings.HasSuffix(keyPattern, "*") {
+	if strings.ContainsRune(keyPattern, '*') {
 		prefix := strings.TrimSuffix(keyPattern, "*")
 
 		if strings.ContainsRune(prefix, '*') {
@@ -85,13 +100,13 @@ func (s *WildcardStore[T]) Insert(keyPattern string, value T) error {
 				return ErrItemAlreadyExist
 			}
 		}
-		s.wildcard = append(s.wildcard, &wildcardEntry[T]{
-			prefix: prefix,
-			item:   value,
+
+		wildcard := append(s.wildcard, &wildcardEntry[T]{prefix: prefix, item: value})
+		sort.Slice(wildcard, func(i, j int) bool {
+			return len(wildcard[i].prefix) < len(wildcard[j].prefix)
 		})
-		sort.Slice(s.wildcard, func(i, j int) bool {
-			return len(s.wildcard[i].prefix) < len(s.wildcard[j].prefix)
-		})
+
+		s.wildcard = wildcard
 		return nil
 	}
 
@@ -104,5 +119,6 @@ func (s *WildcardStore[T]) Insert(keyPattern string, value T) error {
 	}
 
 	s.exactly[keyPattern] = value
+
 	return nil
 }

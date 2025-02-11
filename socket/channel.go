@@ -2,8 +2,10 @@ package socket
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/nidorx/chain"
@@ -15,14 +17,14 @@ import (
 type LeaveReason int
 
 const (
-	LeaveReasonLeave  = LeaveReason(0) // Client called _leave event (channel.leave()).
-	LeaveReasonRejoin = LeaveReason(1) // Client called _join and there is already an active socket for the same topic
-	LeaveReasonClose  = LeaveReason(2) // Connection lost and session is terminated. See Session.ScheduleShutdown
+	LeaveReasonLeave  LeaveReason = 0 // Client called _leave event (channel.leave()).
+	LeaveReasonRejoin LeaveReason = 1 // Client called _join and there is already an active socket for the same topic
+	LeaveReasonClose  LeaveReason = 2 // Connection lost and session is terminated. See Session.ScheduleShutdown
 )
 
 var (
-	ErrJoinCrashed    = fmt.Errorf("join crashed")
-	ErrUnmatchedTopic = fmt.Errorf("unmatched topic")
+	ErrJoinCrashed    = errors.New("join crashed")
+	ErrUnmatchedTopic = errors.New("unmatched topic")
 )
 
 // JoinHandler invoked when the client joins a channel (event:_join, `js: channel.join()`).
@@ -47,7 +49,7 @@ type LeaveHandler func(socket *Socket, reason LeaveReason)
 
 // NewChannel Defines a channel matching the given topic.
 func NewChannel(topicPattern string, factory func(channel *Channel)) *Channel {
-	channel := &Channel{TopicPattern: topicPattern}
+	channel := &Channel{topicPattern: topicPattern}
 	factory(channel)
 	return channel
 }
@@ -55,14 +57,18 @@ func NewChannel(topicPattern string, factory func(channel *Channel)) *Channel {
 // Channel provide a means for bidirectional communication from clients that integrate with the pubsub layer for
 // soft-realtime functionality.
 type Channel struct {
-	TopicPattern  string // The string pattern, for example `"room:*"`, `"users:*"`, or `"system"`
-	joinHandlers  *pkg.WildcardStore[JoinHandler]
-	inHandlers    *pkg.WildcardStore[InHandler]
-	outHandlers   *pkg.WildcardStore[OutHandler]
-	leaveHandlers *pkg.WildcardStore[LeaveHandler]
-	serializer    chain.Serializer
-	sockets       map[string]map[*Socket]bool
-	socketsMutex  sync.RWMutex
+	topicPattern   string // The string pattern, for example `"room:*"`, `"users:*"`, or `"system"`
+	joinHandlers   *pkg.WildcardStore[JoinHandler]
+	inHandlers     *pkg.WildcardStore[InHandler]
+	outHandlers    *pkg.WildcardStore[OutHandler]
+	leaveHandlers  *pkg.WildcardStore[LeaveHandler]
+	serializer     chain.Serializer
+	socketsMutex   sync.RWMutex
+	socketsByTopic map[string]map[string]*Socket
+}
+
+func (c *Channel) TopicPattern() string {
+	return c.topicPattern
 }
 
 // Join Handle channel joins by `topic`.
@@ -143,55 +149,57 @@ func (c *Channel) Leave(topic string, handler LeaveHandler) {
 	}
 }
 
-// Broadcast on the pubsub server with the given topic, event and payload.
-func (c *Channel) Broadcast(topic string, event string, payload any) (err error) {
-	message := newMessage(MessageTypeBroadcast, topic, event, payload)
-	defer deleteMessage(message)
+// Broadcast to all sockets on the pubsub cluster with the given topic, event and payload.
+func (c *Channel) Broadcast(topic string, event string, payload any) error {
+	message := getMessage(MessageTypeBroadcast, topic, event, payload)
+	defer putMessage(message)
 
-	var bytes []byte
-	if bytes, err = c.serializer.Encode(message); err != nil {
-		return
+	if bytes, err := c.serializer.Encode(message); err != nil {
+		return err
+	} else {
+		return pubsub.Broadcast("ch:"+topic, bytes)
 	}
-	err = pubsub.Broadcast(topic, bytes)
-	return
 }
 
-// LocalBroadcast on the pubsub server with the given topic, event and payload.
-func (c *Channel) LocalBroadcast(topic string, event string, payload any) (err error) {
-	message := newMessage(MessageTypeBroadcast, topic, event, payload)
-	var bytes []byte
-	if bytes, err = c.serializer.Encode(message); err != nil {
-		return
+// LocalBroadcast to all sockets on local server with the given topic, event and payload.
+func (c *Channel) LocalBroadcast(topic string, event string, payload any) error {
+	message := getMessage(MessageTypeBroadcast, topic, event, payload)
+	defer putMessage(message)
+
+	if bytes, err := c.serializer.Encode(message); err != nil {
+		return err
+	} else {
+		pubsub.LocalBroadcast("ch:"+topic, bytes)
+		return nil
 	}
-	pubsub.LocalBroadcast(topic, bytes)
-	return
 }
 
-// Subscribe ma
-func (c *Channel) Subscribe(pubsubTopic, channelTopic, channelEvent string) {
-	pubsub.Subscribe(pubsubTopic, pubsub.DispatcherFunc(func(topic string, pubsubPayload []byte, from string) {
-		payload := map[string]any{}
+// Subscribe to the pubsub topic automaticaly pushing messages to the joined clients
+func (c *Channel) Subscribe(topicPattern, event string) {
+	pubsub.Subscribe(topicPattern, pubsub.DispatcherFunc(func(topic string, pubsubPayload []byte, from string) {
+		var payload any
 		if err := json.Unmarshal(pubsubPayload, &payload); err != nil {
 			slog.Warn(
 				"[chain.socket] failed to decode pubsub message",
 				slog.Any("error", err),
 				slog.String("from", from),
-				slog.String("event", channelEvent),
-				slog.String("pubsubTopic", pubsubTopic),
+				slog.String("event", event),
+				slog.String("pubsubTopic", topicPattern),
 				slog.String("topic", topic),
 				slog.String("message", string(pubsubPayload)),
 			)
 			return
 		}
 
-		message := newMessage(MessageTypeBroadcast, channelTopic, channelEvent, payload)
-		c.dispatch(channelTopic, message, from)
+		c.dispatch(topic, getMessage(MessageTypeBroadcast, topic, event, payload), from)
 	}))
 }
 
 // Dispatch Hook invoked by pubsub dispatch.
 func (c *Channel) Dispatch(topic string, channelMessageEncoded []byte, from string) {
-	var message = newMessageAny()
+	var message = getMessageAny()
+
+	topic = strings.TrimPrefix(topic, "ch:")
 
 	if _, err := c.serializer.Decode(channelMessageEncoded, message); err != nil {
 		slog.Debug(
@@ -200,23 +208,23 @@ func (c *Channel) Dispatch(topic string, channelMessageEncoded []byte, from stri
 			slog.String("topic", topic),
 			slog.String("from", from),
 		)
-		deleteMessage(message)
+		putMessage(message)
 		return
 	}
 
 	c.dispatch(topic, message, from)
 }
 
-func (c *Channel) dispatch(topic string, message *Message, from string) {
+func (c *Channel) dispatch(topic string, message *Message, _ string) {
 
-	defer deleteMessage(message)
+	defer putMessage(message)
 
 	// get sockets
 	c.socketsMutex.RLock()
 	var sockets []*Socket
-	if len(c.sockets) > 0 {
-		if ss, exist := c.sockets[topic]; exist {
-			for socket := range ss {
+	if len(c.socketsByTopic) > 0 {
+		if ss, exist := c.socketsByTopic[topic]; exist {
+			for _, socket := range ss {
 				sockets = append(sockets, socket)
 			}
 		}
@@ -250,7 +258,7 @@ func (c *Channel) dispatch(topic string, message *Message, from string) {
 	}
 }
 
-func (c *Channel) handleJoin(topic string, payload any, socket *Socket) (reply any, err error) {
+func (c *Channel) handleJoin(topic string, params any, socket *Socket) (reply any, err error) {
 	defer func() {
 		if rcv := recover(); rcv != nil {
 			//pc, file, line, _ := runtime.Caller(2)
@@ -261,20 +269,22 @@ func (c *Channel) handleJoin(topic string, payload any, socket *Socket) (reply a
 
 	if c.joinHandlers != nil {
 		if handler := c.joinHandlers.Match(topic); handler != nil {
-			if reply, err = handler(payload, socket); err == nil {
-				// subscribe topic and configure fastlane
-				pubsub.Subscribe(topic, c)
+			if reply, err = handler(params, socket); err == nil {
+
+				// subscribe channel topic and configure fastlane
+				// prefix "ch:" to be socket exclusive events
+				pubsub.Subscribe("ch:"+topic, c)
 
 				c.socketsMutex.Lock()
 				defer c.socketsMutex.Unlock()
 
-				if c.sockets == nil {
-					c.sockets = map[string]map[*Socket]bool{}
+				if c.socketsByTopic == nil {
+					c.socketsByTopic = map[string]map[string]*Socket{}
 				}
-				if _, exist := c.sockets[socket.Topic()]; !exist {
-					c.sockets[socket.Topic()] = map[*Socket]bool{}
+				if _, exist := c.socketsByTopic[socket.Topic()]; !exist {
+					c.socketsByTopic[socket.Topic()] = map[string]*Socket{}
 				}
-				c.sockets[socket.Topic()][socket] = true
+				c.socketsByTopic[socket.Topic()][socket.Id()] = socket
 				return
 			}
 		}
@@ -290,16 +300,16 @@ func (c *Channel) handleLeave(socket *Socket, reason LeaveReason) {
 
 		topic := socket.Topic()
 
-		pubsub.Unsubscribe(topic, c)
+		pubsub.Unsubscribe("ch:"+topic, c)
 
 		// remove socket reference on channel
 		c.socketsMutex.Lock()
 		defer c.socketsMutex.Unlock()
-		if len(c.sockets) == 0 {
+		if len(c.socketsByTopic) == 0 {
 			return
 		}
 
-		delete(c.sockets[topic], socket)
+		delete(c.socketsByTopic[topic], socket.Id())
 		if c.leaveHandlers != nil {
 			if handler := c.leaveHandlers.Match(topic); handler != nil {
 				handler(socket, reason)

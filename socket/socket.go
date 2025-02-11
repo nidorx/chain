@@ -31,7 +31,7 @@ type Socket struct {
 }
 
 func (s *Socket) Id() string {
-	return s.session.socketId
+	return s.session.id
 }
 
 func (s *Socket) Endpoint() string {
@@ -67,9 +67,9 @@ func (s *Socket) Push(event string, payload any) (err error) {
 		return ErrSocketNotJoined
 	}
 
-	message := newMessage(MessageTypePush, s.topic, event, payload)
+	message := getMessage(MessageTypePush, s.topic, event, payload)
 	message.JoinRef = s.joinRef
-	defer deleteMessage(message)
+	defer putMessage(message)
 
 	var encoded []byte
 	if encoded, err = s.handler.Serializer.Encode(message); err != nil {

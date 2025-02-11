@@ -67,8 +67,8 @@ func (h *Handler) Configure(router *chain.Router, endpoint string) {
 	h.channels = &pkg.WildcardStore[*Channel]{}
 
 	for _, channel := range h.Channels {
-		if err := h.channels.Insert(channel.TopicPattern, channel); err != nil {
-			panic(fmt.Sprintf("[chain.socket] invalid channel for topic. TopicPattern: %s, Error: %s", channel.TopicPattern, err.Error()))
+		if err := h.channels.Insert(channel.topicPattern, channel); err != nil {
+			panic(fmt.Sprintf("[chain.socket] invalid channel for topic. TopicPattern: %s, Error: %s", channel.topicPattern, err.Error()))
 		}
 		channel.serializer = h.Serializer
 	}
@@ -90,7 +90,7 @@ func (h *Handler) Connect(endpoint string, params map[string]string) (session *S
 	session = &Session{
 		Params:   params,
 		Options:  h.Options,
-		socketId: socketId,
+		id:       socketId,
 		endpoint: endpoint,
 		handler:  h,
 		closed:   false,
@@ -132,7 +132,7 @@ func (h *Handler) Dispatch(payload []byte, session *Session) {
 		// @todo: goroutine using ants
 		// @todo: defer recovery
 
-		message := newMessageAny()
+		message := getMessageAny()
 		if _, err := h.Serializer.Decode(payload, message); err != nil {
 			slog.Debug(
 				"[chain.socket] could not decode serialized data",
@@ -140,7 +140,7 @@ func (h *Handler) Dispatch(payload []byte, session *Session) {
 				slog.Any("Payload", payload),
 			)
 
-			deleteMessage(message)
+			putMessage(message)
 			return
 		}
 
@@ -164,7 +164,7 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 	if channel == nil {
 		slog.Info(
 			"[chain.socket] ignoring unmatched topic",
-			slog.Any("socket_id", session.SocketId()),
+			slog.Any("session_id", session.Id()),
 			slog.String("Topic", topic),
 		)
 
@@ -174,8 +174,8 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 	socket := session.GetSocket(topic)
 	if socket != nil {
 		slog.Info(
-			"[chain.socket] duplicate channel join. closing existing channel for new join",
-			slog.Any("socket_id", session.SocketId()),
+			"[chain.socket] duplicated channel join. closing existing channel for new join",
+			slog.Any("session_id", session.Id()),
 			slog.String("Topic", topic),
 		)
 
@@ -188,24 +188,23 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 			}
 
 			if socket.joinRef != message.JoinRef {
-				reply := newMessage(MessageTypePush, topic, "_close", nil)
+				reply := getMessage(MessageTypePush, topic, "_close", nil)
 				reply.Ref = socket.ref
 				reply.JoinRef = socket.joinRef
 				h.push(reply, session)
-				deleteMessage(reply)
 			}
 
-			deleteSocket(socket)
+			putSocket(socket)
 		}
 	}
 
-	socket = newSocket(message.Ref, message.JoinRef, topic, channel, session, h)
+	socket = getSocket(message.Ref, message.JoinRef, topic, channel, session, h)
 
 	socket.Params = session.Params
 
 	payload, err := channel.handleJoin(topic, message.Payload, socket)
 	if err != nil {
-		deleteSocket(socket)
+		putSocket(socket)
 		h.pushIgnore(message, session, err)
 		return
 	}
@@ -214,7 +213,6 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 
 	session.setSocket(topic, socket)
 
-	defer deleteMessage(message)
 	message.Kind = MessageTypeReply
 	message.Status = ReplyStatusCodeOk
 	message.Payload = payload
@@ -235,10 +233,9 @@ func (h *Handler) handleLeave(message *Message, info *Session) {
 			socket.channel.handleLeave(socket, LeaveReasonLeave)
 		}
 
-		deleteSocket(socket)
+		putSocket(socket)
 	}
 
-	defer deleteMessage(message)
 	message.Kind = MessageTypeReply
 	message.Status = ReplyStatusCodeOk
 
@@ -251,15 +248,13 @@ func (h *Handler) handleMessage(message *Message, session *Session) {
 	if socket == nil {
 		slog.Info(
 			"[chain.socket] ignoring unmatched topic",
-			slog.Any("socket_id", session.SocketId()),
+			slog.Any("session_id", session.Id()),
 			slog.String("Topic", topic),
 		)
 
 		h.pushIgnore(message, session, ErrUnmatchedTopic)
 		return
 	}
-
-	defer deleteMessage(message)
 
 	channel := socket.channel
 	payload, err := channel.handleIn(message.Event, message.Payload, socket)
@@ -273,25 +268,27 @@ func (h *Handler) handleMessage(message *Message, session *Session) {
 		message.Status = ReplyStatusCodeOk
 		message.Payload = payload
 		h.push(message, session)
+	} else {
+		putMessage(message)
 	}
 }
 
 func (h *Handler) handleClose(info *Session) {
 	h.sessionsMutex.Lock()
-	delete(h.sessions, info.SocketId())
+	delete(h.sessions, info.Id())
 	h.sessionsMutex.Unlock()
 
 	info.socketsMutex.Lock()
 	defer info.socketsMutex.Unlock()
 
-	if info.sockets != nil {
-		for _, socket := range info.sockets {
+	if info.socketsByTopic != nil {
+		for _, socket := range info.socketsByTopic {
 			if socket.status != StatusLeaving {
 				if socket.channel != nil {
 					socket.channel.handleLeave(socket, LeaveReasonClose)
 				}
 
-				deleteSocket(socket)
+				putSocket(socket)
 			}
 		}
 	}
@@ -301,20 +298,21 @@ func (h *Handler) handleHeartbeat(message *Message, info *Session) {
 
 }
 
-func (h *Handler) push(reply *Message, info *Session) {
+func (h *Handler) push(message *Message, info *Session) {
+	defer putMessage(message)
 	var bytes []byte
 	var err error
-	if bytes, err = h.Serializer.Encode(reply); err != nil {
+	if bytes, err = h.Serializer.Encode(message); err != nil {
 		slog.Debug(
 			"[chain.socket] could not encode message",
 			slog.Any("Error", err),
-			slog.Int("Kind", int(reply.Kind)),
-			slog.Int("JoinRef", reply.JoinRef),
-			slog.Int("Ref", reply.Ref),
-			slog.Int("Status", reply.Status),
-			slog.String("Topic", reply.Topic),
-			slog.String("Event", reply.Event),
-			slog.Any("Payload", reply.Payload),
+			slog.Int("Kind", int(message.Kind)),
+			slog.Int("JoinRef", message.JoinRef),
+			slog.Int("Ref", message.Ref),
+			slog.Int("Status", message.Status),
+			slog.String("Topic", message.Topic),
+			slog.String("Event", message.Event),
+			slog.Any("Payload", message.Payload),
 		)
 		return
 	}
@@ -322,7 +320,6 @@ func (h *Handler) push(reply *Message, info *Session) {
 }
 
 func (h *Handler) pushIgnore(message *Message, info *Session, reason error) {
-	defer deleteMessage(message)
 	message.Kind = MessageTypeReply
 	message.Status = ReplyStatusCodeError
 	message.Payload = map[string]string{"reason": reason.Error()}
@@ -336,7 +333,7 @@ func (h *Handler) getChannel(topic string) *Channel {
 	return nil
 }
 
-func newSocket(ref int, joinRef int, topic string, channel *Channel, info *Session, handler *Handler) *Socket {
+func getSocket(ref int, joinRef int, topic string, channel *Channel, info *Session, handler *Handler) *Socket {
 	socket := socketPool.Get().(*Socket)
 	socket.ref = ref
 	socket.joinRef = joinRef
@@ -349,7 +346,7 @@ func newSocket(ref int, joinRef int, topic string, channel *Channel, info *Sessi
 	return socket
 }
 
-func deleteSocket(socket *Socket) {
+func putSocket(socket *Socket) {
 	socket.topic = ""
 	socket.channel = nil
 	socket.session = nil

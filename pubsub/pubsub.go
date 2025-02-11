@@ -48,14 +48,14 @@ type subscription struct {
 // pubsub Realtime Publisher/Subscriber service.
 type pubsub struct {
 	adapters           *pkg.WildcardStore[*AdapterConfig]
-	subscriptions      map[string]*subscription
+	subscriptions      *pkg.WildcardStore[*subscription]
 	unsubscribeTimers  map[string]*time.Timer
 	unsubscribeMutex   sync.Mutex
 	subscriptionsMutex sync.RWMutex
 }
 
 var p = &pubsub{
-	subscriptions:     map[string]*subscription{},
+	subscriptions:     &pkg.WildcardStore[*subscription]{},
 	unsubscribeTimers: map[string]*time.Timer{},
 }
 
@@ -64,38 +64,48 @@ func Self() string {
 	return selfIdString
 }
 
-func Subscribe(topic string, dispatcher Dispatcher) {
+func Subscribe(topicPattern string, dispatcher Dispatcher) {
 	p.subscriptionsMutex.Lock()
 	defer p.subscriptionsMutex.Unlock()
 	var sub *subscription
-	var exist bool
-	if sub, exist = p.subscriptions[topic]; !exist {
+
+	if sub = p.subscriptions.MatchExactly(topicPattern); sub == nil {
 		sub = &subscription{dispatchers: map[Dispatcher]int{}}
-		p.subscriptions[topic] = sub
-		go trySubscribe(topic)
+		if err := p.subscriptions.Insert(topicPattern, sub); err != nil {
+			slog.Warn(
+				"[chain.pubsub] failed to subscribe",
+				slog.String("topic", topicPattern),
+				slog.Any("error", err),
+			)
+			return
+		}
+		go trySubscribe(topicPattern)
 	}
-	if _, exist = sub.dispatchers[dispatcher]; !exist {
+
+	if _, exist := sub.dispatchers[dispatcher]; !exist {
 		sub.dispatchers[dispatcher] = 0
 	}
 	sub.dispatchers[dispatcher] = sub.dispatchers[dispatcher] + 1
 }
 
 // Unsubscribe the dispatchFunc from the pubsub adapter's topic.
-func Unsubscribe(topic string, dispatcher Dispatcher) {
+func Unsubscribe(topicPattern string, dispatcher Dispatcher) {
 	p.subscriptionsMutex.Lock()
 	defer p.subscriptionsMutex.Unlock()
 	var sub *subscription
 	var exist bool
-	if sub, exist = p.subscriptions[topic]; !exist {
+
+	if sub = p.subscriptions.MatchExactly(topicPattern); sub == nil {
 		return
 	}
+
 	if _, exist = sub.dispatchers[dispatcher]; !exist {
 		return
 	}
 	sub.dispatchers[dispatcher] = sub.dispatchers[dispatcher] - 1
 	if sub.dispatchers[dispatcher] < 1 {
 		delete(sub.dispatchers, dispatcher)
-		go scheduleUnsubscribe(topic)
+		go scheduleUnsubscribe(topicPattern)
 	}
 }
 
@@ -125,7 +135,7 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	msgToSend = append(append([]byte{byte(MessageTypeBroadcast)}, selfIdBytes...), msgToSend...)
 
 	// Check if we have compression enabled
-	if config.DisableCompression == false {
+	if !config.DisableCompression {
 		var compressed []byte
 		if compressed, err = compressPayload(msgToSend); err != nil {
 			slog.Warn(
@@ -139,7 +149,7 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	}
 
 	// Check if we have encryption enabled
-	if config.DisableEncryption == false {
+	if !config.DisableEncryption {
 		keyring := config.Keyring
 		if keyring == nil {
 			keyring = globalKeyring
@@ -450,7 +460,7 @@ func trySubscribe(topic string) {
 	}
 }
 
-// scheduleUnsubscribe unsubscribe the adapter after 15 seconds
+// scheduleUnsubscribe unsubscribe the adapter after 5 seconds
 func scheduleUnsubscribe(topic string) {
 	p.unsubscribeMutex.Lock()
 	if _, exist := p.unsubscribeTimers[topic]; exist {
@@ -458,7 +468,7 @@ func scheduleUnsubscribe(topic string) {
 		return
 	}
 
-	timer := time.NewTimer(time.Second * 15)
+	timer := time.NewTimer(time.Second * 5)
 	p.unsubscribeTimers[topic] = timer
 	p.unsubscribeMutex.Unlock()
 
@@ -488,18 +498,29 @@ func dispatchMessage(topic string, message []byte, from string) {
 
 		// get subscriptions & dispatchers
 		p.subscriptionsMutex.RLock()
-		var sub *subscription
-		var exist bool
-		if sub, exist = p.subscriptions[topic]; !exist {
+		// var sub *subscription
+		// var exist bool
+
+		subs := p.subscriptions.MatchAll(topic)
+		if len(subs) == 0 {
 			p.subscriptionsMutex.RUnlock()
 			// if we are still receiving this message, schedule removal
 			go scheduleUnsubscribe(topic)
 			return
 		}
 
+		// if sub, exist = p.subscriptions[topic]; !exist {
+		// 	p.subscriptionsMutex.RUnlock()
+		// 	// if we are still receiving this message, schedule removal
+		// 	go scheduleUnsubscribe(topic)
+		// 	return
+		// }
+
 		var dispatchers []Dispatcher
-		for dispatchFunc, _ := range sub.dispatchers {
-			dispatchers = append(dispatchers, dispatchFunc)
+		for _, sub := range subs {
+			for dispatchFunc, _ := range sub.dispatchers {
+				dispatchers = append(dispatchers, dispatchFunc)
+			}
 		}
 		p.subscriptionsMutex.RUnlock()
 

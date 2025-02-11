@@ -16,7 +16,7 @@ var (
 	clientJsFS             embed.FS
 	clientJsContent        []byte
 	clientJsEtag           string
-	clientJsModTime, _     = time.Parse(time.DateTime, "2023-05-07 00:00:00")
+	clientJsModTime, _     = time.Parse(time.DateTime, "2025-02-09 00:00:00")
 	configuredRouterClient = map[*chain.Router]bool{}
 )
 

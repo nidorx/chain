@@ -29,11 +29,11 @@ var messagePool = &sync.Pool{
 	},
 }
 
-func newMessageAny() *Message {
+func getMessageAny() *Message {
 	return messagePool.Get().(*Message)
 }
 
-func newMessage(kind MessageType, topic string, event string, payload any) *Message {
+func getMessage(kind MessageType, topic string, event string, payload any) *Message {
 	m := messagePool.Get().(*Message)
 	m.Kind = kind
 	m.Topic = topic
@@ -42,7 +42,7 @@ func newMessage(kind MessageType, topic string, event string, payload any) *Mess
 	return m
 }
 
-func deleteMessage(m *Message) {
+func putMessage(m *Message) {
 	m.Payload = nil
 	m.Event = ""
 	m.Topic = ""

@@ -690,9 +690,9 @@ func Test_Router_Matched_Route_Path(t *testing.T) {
 	route1 := "/user/:name"
 	routed1 := false
 	handle1 := func(ctx *Context) error {
-		route := ctx.Route.Pattern()
-		if route != route1 {
-			t.Fatalf("Wrong matched route: want %s, got %s", route1, route)
+		path := ctx.Route.Path()
+		if path != route1 {
+			t.Fatalf("Wrong matched route: want %s, got %s", route1, path)
 		}
 		routed1 = true
 		return nil
@@ -701,9 +701,9 @@ func Test_Router_Matched_Route_Path(t *testing.T) {
 	route2 := "/user/:name/details"
 	routed2 := false
 	handle2 := func(ctx *Context) error {
-		route := ctx.Route.Pattern()
-		if route != route2 {
-			t.Fatalf("Wrong matched route: want %s, got %s", route2, route)
+		path := ctx.Route.Path()
+		if path != route2 {
+			t.Fatalf("Wrong matched route: want %s, got %s", route2, path)
 		}
 		routed2 = true
 		return nil
@@ -712,9 +712,9 @@ func Test_Router_Matched_Route_Path(t *testing.T) {
 	route3 := "/"
 	routed3 := false
 	handle3 := func(ctx *Context) error {
-		route := ctx.Route.Pattern()
-		if route != route3 {
-			t.Fatalf("Wrong matched route: want %s, got %s", route3, route)
+		path := ctx.Route.Path()
+		if path != route3 {
+			t.Fatalf("Wrong matched route: want %s, got %s", route3, path)
 		}
 		routed3 = true
 		return nil
