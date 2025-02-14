@@ -27,6 +27,10 @@ func (s *Session) Id() string {
 	return s.id
 }
 
+func (s *Session) Closed() bool {
+	return s.closed
+}
+
 // Endpoint Path to socket endpoint
 func (s *Session) Endpoint() string {
 	return s.endpoint
@@ -56,11 +60,12 @@ func (s *Session) Push(bytes []byte) {
 }
 
 // Dispatch message to Channel
-func (s *Session) Dispatch(message []byte) {
+func (s *Session) Dispatch(message []byte) (event string) {
 	s.StopScheduledShutdown()
 	if !s.closed {
-		s.handler.Dispatch(message, s)
+		event = s.handler.Dispatch(message, s)
 	}
+	return
 }
 
 // StopScheduledShutdown cancels the final termination of that session.

@@ -1,0 +1,43 @@
+body {
+    font-family: 'Open Sans', sans-serif;
+    background: #D5B3DE;
+    font-size: 1.0em;
+    line-height: 1.4em;
+    overflow-x: hidden;
+}
+
+h2 {
+    margin: 5px 0;
+}
+
+.container {
+    width: 75%;
+    height: 100%;
+    padding: 20px;
+    background-color: #fff;
+    top: 100px;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: auto;
+}
+
+#chat-box {
+    border: 1px #000 solid;
+    padding: 0 0 0 5px;
+    min-height: 225px;
+    max-height: 225px;
+    overflow: scroll;
+    font-size: 12px;
+    font-family: monospace;
+    line-height: 14px;
+}
+
+button {
+    margin-right: 2px;
+}
+
+#server-list button.preferred {
+    color: green;
+    font-weight: bold;
+}

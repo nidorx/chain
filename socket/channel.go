@@ -23,8 +23,9 @@ const (
 )
 
 var (
-	ErrJoinCrashed    = errors.New("join crashed")
-	ErrUnmatchedTopic = errors.New("unmatched topic")
+	ErrJoinCrashed       = errors.New("join crashed")
+	ErrUnmatchedTopic    = errors.New("unmatched topic")
+	ErrJoinWildcardTopic = errors.New("joining topics with wildcard is not allowed")
 )
 
 // JoinHandler invoked when the client joins a channel (event:_join, `js: channel.join()`).

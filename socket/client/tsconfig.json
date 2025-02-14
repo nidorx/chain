@@ -1,18 +1,25 @@
 {
     "compilerOptions": {
-		"target": "esnext",
-		"module": "esnext",
-		"moduleResolution": "node",
-		"strict": true,
-		"sourceMap": true,
-		"resolveJsonModule": true,
+        "target": "esnext",
+        "module": "ESNext",
+        "removeComments": true,
+        "moduleResolution": "node",
+        "strict": true,
+        "sourceMap": true,
+        "resolveJsonModule": true,
         "strictNullChecks": false,
-		"esModuleInterop": true,
-		"lib": ["esnext", "dom"],
-		"paths": {
-			"@/*": ["./*"]
-      	}
+        "esModuleInterop": true,
+        "lib": [
+            "esnext",
+            "dom"
+        ],
+        "paths": {
+            "@/*": [
+                "./*"
+            ]
+        }
     },
-    "include": ["*.ts"],
+    "include": [
+        "*.ts"
+    ],
 }
-  

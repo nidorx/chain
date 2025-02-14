@@ -1,11 +1,75 @@
 /**
  * Based on https://github.com/phoenixframework/phoenix/tree/main/assets/js/phoenix
  */
-const SOCKET = 'Socket';
-const CHANNEL = 'Channel';
-const TRANSPORT = 'Transport';
 
-enum MessageKindEnum {
+export const Options: {
+    Debug: boolean; // When true, enables debug logging. Default false.
+    [key: string]: any
+} = {
+    Debug: true,
+}
+
+export interface SocketOptions {
+    // The default timeout in milliseconds to trigger push timeouts. (Defaults 30000)
+    timeout?: number;
+
+    sessionStorage?: Storage;
+
+    rejoinInterval?: number[];
+
+    disconnectIdleTimeout?: number;
+
+    /**
+     * The transport mechanisms for server connection
+     * 
+     * Default [{name:"SSE"}, {name:"LongPolling"}]
+     */
+    transport?: TransportConfig[];
+
+    /**
+     * Gets the list of socket servers. Allows load balancing or fine-tuned connection rules.
+     * 
+     * E.g., Retrieve a list of backend servers grouping users by region or business rule.
+     */
+    getNodes: () => Promise<string[]>;
+
+    /**
+     * How often to check for modifications in the server list.
+     * 
+     * Default is 30 seconds.
+     */
+    getNodesInterval?: number;
+
+    /**
+     * After connecting to a new node, disconnects from the old server (if still active) after this interval.
+     * 
+     * Important to handle message deduplication.
+     * 
+     * Default is 5 seconds.
+     */
+    dropNodeConnectionAfter?: number;
+
+    /**
+     * Allows discarding duplicate messages based on a specific rule.
+     * 
+     * @param msg 
+     * @returns 
+     */
+    duplicated?: (msg: Message) => boolean;
+}
+
+export interface TransportConfig {
+    name: string;
+    sid?: string;
+    cors?: boolean;
+    params?: any;
+}
+
+export interface ChannelOptions {
+    onMessage?: (_e: string, payload: any, ref?: number, p_joinRef?: number) => any;
+}
+
+export enum MessageKindEnum {
     PUSH = 0,
     REPLY = 1,
     BROADCAST = 2
@@ -19,64 +83,6 @@ enum ChannelStateEnum {
     LEAVING = 4,
 }
 
-interface Message {
-    joinRef: number;
-    ref: number;
-    topic?: string;
-    event: string;
-    kind?: MessageKindEnum;
-    payload: any | string | { status: 'ok' | 'error'; response: string };
-}
-
-export interface SocketOptions {
-    transport?: typeof TransportSSE;
-    transportOptions?: TransportOptions
-    timeout?: number;
-    sessionStorage?: Storage;
-    rejoinInterval?: number[];
-    reconnectInterval?: number[];
-    disconnectIdleTimeout?: number;
-}
-
-export interface TransportOptions {
-    cors?: boolean;
-    sid?: string;
-    params?: any;
-}
-
-export interface ChannelOptions {
-    onMessage?: (_e: string, payload: any, ref?: number, p_joinRef?: number) => any;
-}
-
-/**
- * Copyright 2016 Andrey Sitnik <andrey@sitnik.ru>, https://github.com/ai/nanoevents/blob/main/LICENSE
- */
-class Events {
-    readonly events: { [key: string]: Array<(...args: any) => void> } = {};
-
-    emit(event: string, ...args: any) {
-        let callbacks = this.events[event] || [];
-        for (let i = 0, length = callbacks.length; i < length; i++) {
-            callbacks[i](...args);
-        }
-    }
-
-    on(event: string, callback: (...args: any) => void): () => void {
-        this.events[event]?.push(callback) || (this.events[event] = [callback]);
-
-        // off
-        return () => {
-            let callbacks = this.events[event];
-            if (callbacks) {
-                let idx = callbacks.indexOf(callback);
-                if (idx >= 0) {
-                    callbacks.splice(idx, 1);
-                }
-            }
-        };
-    }
-}
-
 enum SocketStateEnum {
     DISCONNECTED = 0,
     CONNECTING = 2,
@@ -85,48 +91,215 @@ enum SocketStateEnum {
     ERRORED = 5,
 }
 
+export interface Message {
+    joinRef: number;
+    ref: number;
+    topic?: string;
+    event: string;
+    kind?: MessageKindEnum;
+    payload: any | string | { status: 'ok' | 'error'; response: string };
+    payload_raw: string;
+}
+
+const SOCKET = 'Socket';
+const CHANNEL = 'Channel';
+const TRANSPORT = 'Transport';
+
+/**
+ * Copyright 2016 Andrey Sitnik <andrey@sitnik.ru>, https://github.com/ai/nanoevents/blob/main/LICENSE
+ */
+export class Events<T> {
+    private readonly events: { [key: string]: Array<(...args: any) => void> } = {};
+
+    emit(event: string, ...args: any) {
+        for (let callbacks = this.events[event] || [], i = 0, l = callbacks.length; i < l; i++) {
+            callbacks[i](...args);
+        }
+    }
+
+    on(event: string, callback: (...args: any) => void): T {
+        this.events[event]?.push(callback) || (this.events[event] = [callback]);
+        return (this as any);
+    }
+
+    off(event: string, callback: any) {
+        let callbacks = this.events[event];
+        if (callbacks) {
+            let idx = callbacks.indexOf(callback);
+            if (idx >= 0) {
+                callbacks.splice(idx, 1);
+            }
+        }
+    }
+}
+
+/**
+ * Represents a node in a server cluster.
+ */
+interface Node {
+    retry: Retry
+    endpoint: string,
+};
+
 /**
  * Initializes the Socket
  */
-export class Socket extends Events {
+export class Socket extends Events<Socket> {
 
     private ref = 1;
-    private state: SocketStateEnum;    
+    private state: SocketStateEnum;
+    private endpoint: string; // current node endpoint
+    private transport: Transport; // current transport
+    private transportListOld: Transport[];
     private disconnectIdleTimer: any;
-    private readonly channels: Channel[] = [];
-    private readonly sendBuffer: Array<() => void> = [];
-    private readonly transport: TransportSSE;
     private readonly timeout: number;
-    private readonly endpoint: string;
+    private readonly channels: Channel[] = [];
+    private readonly duplicated: (msg: Message) => boolean;
+    private readonly sendBuffer: Array<() => void> = [];
     private readonly sessionStorage: Storage;
-    private readonly rejoinInterval: number[];    
+    private readonly rejoinInterval: number[];
+    private readonly transportConfig: TransportConfig[];
     private readonly disconnectIdleTimeout: number;
+    private readonly dropNodeConnectionAfter: number;
 
-    constructor(endpoint: string, options: SocketOptions = {}) {
+    constructor(options: SocketOptions) {
         super();
 
         this.state = SocketStateEnum.DISCONNECTED;
-        this.endpoint = endpoint;
+        // this.endpoint = endpoint;
         this.timeout = options.timeout || 30000;
         this.sessionStorage = options.sessionStorage || (window.sessionStorage);
-        this.rejoinInterval = options.rejoinInterval || [1000, 2000, 5000, 10000];        
+        this.transportConfig = options.transport || [{ name: "SSE" }]
+        this.rejoinInterval = options.rejoinInterval || [1000, 2000, 5000, 10000];
+        this.transportListOld = [];
         this.disconnectIdleTimeout = options.disconnectIdleTimeout || 5000;
+        this.dropNodeConnectionAfter = options.dropNodeConnectionAfter || 5000;
+
+        if (!options.duplicated) {
+            this.duplicated = (msg: Message): boolean => {
+                return false;
+            };
+        } else {
+            this.duplicated = options.duplicated;
+        }
 
         // socket id per browser tab
         let sid = this.getSession("chain:sid");
-        if (sid == null) {
+
+        const newSid = () => {
             sid = (Math.random() + 1).toString(36).substring(7);
             this.storeSession("chain:sid", sid);
         }
 
-        this.transport = new (options.transport || TransportSSE)(endpoint, {
-            ...(options.transportOptions || {}),
-            sid: sid,
-        });
-        this.transport.on("open", this.onConnOpen.bind(this));
-        this.transport.on("error", this.onConnError.bind(this));
-        this.transport.on("message", this.onConnMessage.bind(this));
-        this.transport.on("close", this.onConnClose.bind(this));
+        if (sid == null) {
+            newSid();
+        }
+
+        const newTransport = () => {
+            for (let i = 0; i < this.transportConfig.length; i++) {
+                const config = this.transportConfig[i];
+                if (Transports[config.name]) {
+                    this.transport = new Transports[config.name]({
+                        ...config,
+                        sid: sid,
+                    });
+                    break;
+                }
+            }
+
+            // @TODO: LongPoll fallback
+
+            this.transport.on("open", this.onTransportOpen.bind(this));
+            this.transport.on("error", this.onTransportError.bind(this));
+            this.transport.on("message", this.onTransportMessage.bind(this));
+            this.transport.on("close", this.onTransportClose.bind(this));
+        }
+
+        let nodes: Array<Node> = [];
+
+        const initTransport = (node: Node) => {
+            if (this.transport) {
+                if (this.transport.endpoint() == node.endpoint) {
+                    return
+                }
+                this.transportListOld.push(this.transport);
+                newSid();
+            }
+
+            this.endpoint = node.endpoint;
+
+            const transport = this.transportListOld.find(transport => {
+                return transport.endpoint() == node.endpoint;
+            });
+            if (transport) {
+                this.transportListOld.splice(this.transportListOld.indexOf(transport), 1);
+                this.transport = transport;
+            } else {
+                newTransport();
+            }
+
+            this.state = SocketStateEnum.CONNECTING;
+            this.transport.connect(this.endpoint);
+        }
+
+        const tryConnectToNextNode = () => {
+            let next: Node;
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i];
+                if (node.retry.tries() == 0) {
+                    next = node;
+                    break
+                }
+
+                if (!next || next.retry.tries() > node.retry.tries()) {
+                    next = node;
+                }
+            }
+
+            next.retry.retry();
+        }
+
+        const doGetNodes = async () => {
+            let endpoints = await options.getNodes();
+            if (!endpoints || endpoints.length === 0) {
+                log(SOCKET, 'No nodes available for connection"');
+                return;
+            }
+
+            let currentNode: Node;
+            let newNodes: Array<Node> = [];
+            endpoints.forEach(endpoint => {
+                let node = nodes.find(node => node.endpoint == endpoint);
+                if (node) {
+                    node.retry.reset();
+                } else {
+                    node = {
+                        endpoint: endpoint,
+                        retry: new Retry((retry) => {
+                            initTransport(node);
+                        }, [1, 500, 1000, 2000, 5000])
+                    }
+                }
+                newNodes.push(node);
+                if (this.endpoint == endpoint) {
+                    currentNode = node;
+                }
+            });
+
+            nodes = newNodes;
+
+            if (currentNode == nodes[0]) {
+                // nothing to do, already connected to the priority server
+                return
+            }
+
+            // Not connected to a listed server or currently connected to a fallback auxiliary server
+            // Attempts to switch to the first server in the list
+            return tryConnectToNextNode();
+        }
+
+        setTimeout(doGetNodes);
+        setInterval(doGetNodes, (options.getNodesInterval || 30) * 1000);
     }
 
     getSession(key: string) { return this.sessionStorage.getItem(key) }
@@ -150,7 +323,9 @@ export class Socket extends Events {
             return
         }
         this.state = SocketStateEnum.CONNECTING;
-        return this.transport.connect();
+        if (this.transport) {
+            this.transport.connect(this.endpoint);
+        }
     }
 
     disconnect() {
@@ -158,7 +333,11 @@ export class Socket extends Events {
             return
         }
         this.state = SocketStateEnum.DISCONNECTING;
-        this.transport.close();
+        if (this.transport) {
+            this.transport.close();
+        } else {
+            this.state = SocketStateEnum.DISCONNECTED;
+        }
     }
 
     /**
@@ -194,20 +373,24 @@ export class Socket extends Events {
         }
     }
 
-    leaveOpenTopic(topic: string) {
-        let dupChannel = this.channels.find(channel => {
-            return channel.getTopic() === topic && (channel.isJoined() || channel.isJoining());
+    leave(topic: string) {
+        let channel = this.channels.find(chn => {
+            return chn.getTopic() === topic && (chn.isJoined() || chn.isJoining());
         })
-        if (dupChannel) {
-            log(SOCKET, 'leaving duplicate topic "%s"', topic);
-            dupChannel.leave();
+        if (channel) {
+            log(SOCKET, 'leaving topic "%s"', topic);
+            channel.leave();
         }
     }
 
-    push(message: Message) {
+    push(message: Message, transport?: Transport) {
         let { topic, event, payload, ref, joinRef } = message;
         const data = encode(message);
-        if (this.state == SocketStateEnum.CONNECTED) {
+        if (transport) {
+            // _leave command only
+            log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload);
+            transport.send(data);
+        } else if (this.state == SocketStateEnum.CONNECTED) {
             log(SOCKET, 'push %s %s (%s, %s)', topic, event, joinRef, ref, payload);
             this.transport.send(data);
         } else {
@@ -233,47 +416,72 @@ export class Socket extends Events {
         return this.ref;
     }
 
-    private onConnOpen() {
-        log(SOCKET, 'connected to %s', this.endpoint);
+    private onTransportOpen(transport: Transport) {
+        if (transport == this.transport) {
+            log(SOCKET, 'connected to %s', this.endpoint);
 
-        this.state = SocketStateEnum.CONNECTED;
+            this.state = SocketStateEnum.CONNECTED;
 
-        if (this.sendBuffer.length > 0) {
-            // flush send buffer
-            this.sendBuffer.forEach(callback => callback());
-            this.sendBuffer.splice(0);
+            if (this.sendBuffer.length > 0) {
+                // flush send buffer
+                this.sendBuffer.forEach(callback => callback());
+                this.sendBuffer.splice(0);
+            }
+
+            this.emit('open', transport);
+
+            if (this.transportListOld.length > 0) {
+                let old = this.transportListOld;
+                this.transportListOld = [];
+                setTimeout(() => {
+                    old.forEach(transport => {
+                        transport.close();
+                    })
+                }, this.dropNodeConnectionAfter);
+            }
         }
-
-        this.emit('open');
     }
 
-    private onConnClose(event: any) {
-        log(SOCKET, 'closed');
-        this.state = SocketStateEnum.DISCONNECTED;
-        this.emit('close');
+    private onTransportClose(transport: Transport, event: any) {
+        if (transport == this.transport) {
+            log(SOCKET, 'closed');
+            this.state = SocketStateEnum.DISCONNECTED;
+            this.emit('close');
+        } else {
+            let idx = this.transportListOld.indexOf(transport);
+            if (idx >= 0) {
+                this.transportListOld.splice(idx, 1);
+            }
+        }
     }
 
-    private onConnMessage(data: string) {
+    private onTransportMessage(transport: Transport, data: string) {
         let message = decode(data);
         let { topic, event, payload, ref, joinRef } = message;
         log(SOCKET, 'receive %s %s %s',
             topic || '', event || '', (ref || joinRef) ? (`(${joinRef || ''}, ${ref || ''})`) : '', payload
         );
 
-        this.channels.forEach(channel => {
-            channel.trigger(event, payload, topic, ref, joinRef)
-        });
-
-        this.emit('message', message);
+        // deduplication
+        if (this.duplicated(message)) {
+            this.emit('message:duplicated', message);
+        } else {
+            this.channels.forEach(channel => {
+                channel.trigger(event, payload, topic, ref, joinRef)
+            });
+            this.emit('message', message);
+        }
     }
 
-    private onConnError(error: any) {
-        this.state = SocketStateEnum.ERRORED;
-        this.emit('error', error);
+    private onTransportError(transport: Transport, error: any) {
+        if (transport == this.transport) {
+            this.state = SocketStateEnum.ERRORED;
+            this.emit('error', error);
+        }
     }
 }
 
-export class Channel extends Events {
+export class Channel extends Events<Channel> {
 
     private topic: string;
     private socket: Socket
@@ -282,6 +490,7 @@ export class Channel extends Events {
     private joinPush: Push;
     private joinedOnce: boolean;
     private rejoinRetry: Retry;
+    private joinTransport: Transport;
     private readonly pushBuffer: Push[] = [];
 
     // Overridable message hook
@@ -292,29 +501,39 @@ export class Channel extends Events {
     constructor(topic: string, params: any, socket: Socket, options: ChannelOptions) {
         super();
 
+        if (topic.includes(',') || topic.includes('*')) {
+            throw new Error("Commas and asterisks are not allowed in topic names")
+        }
+
         this.topic = topic;
         this.state = ChannelStateEnum.CLOSED;
         this.socket = socket;
         this.timeout = socket.getTimeout();
         this.onMessage = options.onMessage ? options.onMessage : (_e: string, payload: any) => payload;
 
-        this.rejoinRetry = new Retry(() => {            
+        this.rejoinRetry = new Retry(() => {
             if (socket.isConnected()) {
                 this.rejoin();
             }
         }, socket.getRejoinInterval());
 
-        const cancelOnSocketError = socket.on('error', () => {            
+        const onSocketError = () => {
             this.state = ChannelStateEnum.ERRORED;
             this.rejoinRetry.reset();
-        });
+        };
+        socket.on('error', onSocketError)
 
-        const cancelOnSocketOpen = socket.on('open', () => {            
+        let lastEndpoint: string;
+
+        const onSocketOpen = (transport: Transport) => {
             this.rejoinRetry.reset();
-            if (this.isErrored()) {
+            if (this.isErrored() || (this.joinTransport && (transport != this.joinTransport || transport.endpoint() != lastEndpoint))) {
                 this.rejoin();
             }
-        });
+            this.joinTransport = transport;
+            lastEndpoint = transport.endpoint();
+        }
+        socket.on('open', onSocketOpen);
 
         this.joinPush = new Push(socket, this, '_join', params, this.timeout)
             .on('ok', () => {
@@ -322,12 +541,14 @@ export class Channel extends Events {
                 this.rejoinRetry.reset();
                 this.pushBuffer.forEach(push => push.send());
                 this.pushBuffer.splice(0);
+                this.emit('join:ok');
             })
             .on('error', () => {
                 this.state = ChannelStateEnum.ERRORED;
                 if (socket.isConnected()) {
                     this.rejoinRetry.retry();
                 }
+                this.emit('join:error');
             })
             .on('timeout', () => {
                 log(CHANNEL, 'timeout %s (%s)', topic, this.getJoinRef(), this.joinPush.getTimeout());
@@ -340,6 +561,7 @@ export class Channel extends Events {
                 if (socket.isConnected()) {
                     this.rejoinRetry.retry();
                 }
+                this.emit('join:timeout');
             });
 
         this.onClose(() => {
@@ -348,8 +570,8 @@ export class Channel extends Events {
             }
             log(CHANNEL, 'close %s %s', topic, this.getJoinRef());
 
-            cancelOnSocketOpen();
-            cancelOnSocketError();
+            socket.off('open', onSocketOpen);
+            socket.off('error', onSocketError)
             this.rejoinRetry.reset();
             this.state = ChannelStateEnum.CLOSED;
             socket.remove(this);
@@ -383,17 +605,17 @@ export class Channel extends Events {
     /**
      * Join the channel
      * 
-     * @param p_timeout 
+     * @param timeout 
      * @returns 
      */
-    join(p_timeout = this.timeout) {
+    join(timeout = this.timeout): Channel {
         if (this.joinedOnce) {
             throw new Error("tried to join multiple times. 'join' can only be called a single time per channel instance");
         } else {
-            this.timeout = p_timeout;
+            this.timeout = timeout;
             this.joinedOnce = true;
             this.rejoin();
-            return this.joinPush;
+            return this;
         }
     }
 
@@ -401,7 +623,9 @@ export class Channel extends Events {
         if (this.isLeaving()) {
             return;
         }
-        this.socket.leaveOpenTopic(this.topic);
+
+        // preciso salvar o transporte que fez o join
+        this.socket.leave(this.topic);
         this.state = ChannelStateEnum.JOINING;
         this.joinPush.resend(this.timeout);
     }
@@ -418,28 +642,32 @@ export class Channel extends Events {
       * @example
       * channel.leave().on("ok", () => alert("left!") )
       * 
-      * @param p_timeout 
+      * @param timeout 
       * @returns 
       */
-    leave(p_timeout = this.timeout): Push {
+    leave(timeout = this.timeout): Push {
         this.rejoinRetry.reset();
         this.joinPush.cancelTimeout();
 
         this.state = ChannelStateEnum.LEAVING;
 
-        let onClose = () => {
-            log(CHANNEL, 'leave %s', this.topic);
-            this.trigger('_close', 'leave');
+        const onClose = () => {
+            if (this.state == ChannelStateEnum.LEAVING) {
+                log(CHANNEL, 'leave %s', this.topic);
+                this.trigger('_close', 'leave');
+            }
         }
 
-        let leavePush = new Push(this.socket, this, '_leave', {}, p_timeout)
+        const leavePush = new Push(this.socket, this, '_leave', {}, timeout, this.joinTransport)
             .on('ok', onClose)
             .on('timeout', onClose);
 
         leavePush.send();
 
         if (!this.canPush()) {
-            leavePush.trigger('ok', {});
+            queueMicrotask(() => {
+                leavePush.trigger('ok', {});
+            });
         }
 
         return leavePush;
@@ -459,16 +687,20 @@ export class Channel extends Events {
       * 
       * @param event 
       * @param payload 
-      * @param p_timeout 
+      * @param timeout 
       * @returns 
       */
-    push(event: string, payload: any, p_timeout = this.timeout) {
+    push(event: string, payload: any, timeout = this.timeout): Push {
+        if (event.includes(',')) {
+            throw new Error("Commas are not allowed in event");
+        }
+
         payload = payload || {};
         if (!this.joinedOnce) {
             throw new Error(`tried to push '${event}' to '${this.topic}' before joining. Use channel.join() before pushing events`);
         }
 
-        let push = new Push(this.socket, this, event, payload, p_timeout);
+        let push = new Push(this.socket, this, event, payload, timeout);
         if (this.canPush()) {
             push.send();
         } else {
@@ -501,11 +733,13 @@ export class Channel extends Events {
     }
 
     onClose(callback: (...args: any) => void): () => void {
-        return this.on("_close", callback)
+        this.on("_close", callback);
+        return this.off.bind(this, "_close", callback);
     }
 
     onError(callback: (...args: any) => void): () => void {
-        return this.on("_error", callback)
+        this.on("_error", callback);
+        return this.off.bind(this, "_error", callback);
     }
 
     isClosed() {
@@ -542,18 +776,19 @@ export class Push {
     private channel: Channel;
     private received: any;
     private refEvent?: string;
-    private refEventCancel?: () => void;
+    private transport?: Transport; // for _leave only
     private readonly event: string;
     private readonly events = new Events();
     private readonly payload: any;
 
-    constructor(socket: Socket, channel: Channel, event: string, payload: any, timeout: number) {
+    constructor(socket: Socket, channel: Channel, event: string, payload: any, timeout: number, transport?: Transport) {
         this.ref = socket.nextRef()
         this.event = event;
         this.payload = payload || {};
         this.timeout = timeout;
         this.socket = socket;
         this.channel = channel;
+        this.transport = transport;
     }
 
     getRef() {
@@ -585,29 +820,22 @@ export class Push {
             topic: this.channel.getTopic(),
             event: this.event,
             payload: this.payload,
-        });
+            payload_raw: '',
+        }, this.transport);
     }
 
-    resend(p_timeout: number) {
-        this.timeout = p_timeout;
+    resend(timeout: number) {
+        this.timeout = timeout;
         this.reset();
         this.send();
     }
 
     reset() {
-        if (this.refEventCancel) {
-            this.refEventCancel();
-            this.refEventCancel = undefined;
-        }
+        this.channel.off(this.refEvent, this.onRefEventCallback);
         this.ref = undefined;
         this.sent = false;
         this.refEvent = undefined;
         this.received = null;
-    }
-
-    cancelTimeout() {
-        clearTimeout(this.timer);
-        this.timer = null;
     }
 
     startTimeout() {
@@ -617,20 +845,24 @@ export class Push {
         this.ref = this.socket.nextRef();
         this.refEvent = `chan_reply_${this.ref}`;
 
-        this.refEventCancel = this.channel.on(this.refEvent, (payload: any) => {
-            if (this.refEventCancel) {
-                this.refEventCancel();
-                this.refEventCancel = undefined;
-            }
-            this.cancelTimeout();
-            this.received = payload;
-            let { status, response, _ref } = payload;
-            this.events.emit(status, response);
-        });
+        this.channel.on(this.refEvent, this.onRefEventCallback);
 
         this.timer = setTimeout(() => {
             this.trigger("timeout", {});
         }, this.timeout);
+    }
+
+    cancelTimeout() {
+        clearTimeout(this.timer);
+        this.timer = null;
+    }
+
+    private onRefEventCallback = (payload: any) => {
+        this.channel.off(this.refEvent, this.onRefEventCallback);
+        this.cancelTimeout();
+        this.received = payload;
+        let { status, response, _ref } = payload;
+        this.events.emit(status, response);
     }
 
     hasReceived(status: string) {
@@ -643,21 +875,31 @@ export class Push {
     }
 }
 
+export interface Transport extends Events<Transport> {
+    send(data: any): void;
+    endpoint(): string;
+    connect(endpoint: string): void;
+    close(): void;
+}
+
+export interface TransportConstructor {
+    new(options: TransportConfig): Transport;
+}
+
 /**
  * Channel transport using server-sent events
  */
-export class TransportSSE extends Events {
+export class TransportSSE extends Events<Transport> implements Transport {
 
     private source: EventSource;
-    private readonly options: TransportOptions;
-    private readonly endpoint: string;
-    private readonly endpointPush: string;
+    private endpointRaw: string;
+    private endpointPush: string;
+    private endpointEvents: string;
+    private readonly options: TransportConfig;
 
-    constructor(endpoint: string, options: TransportOptions = {}) {
+    constructor(options: TransportConfig) {
         super();
         this.options = options;
-        this.endpoint = parseUrl(endpoint, '/sse', { ...(this.options.params), sid: options.sid });
-        this.endpointPush = parseUrl(endpoint, '/sse', { sid: options.sid });
     }
 
     send(data: any) {
@@ -672,24 +914,40 @@ export class TransportSSE extends Events {
         });
     }
 
-    connect() {
-        this.source = new EventSource(this.endpoint, {
+    endpoint(): string {
+        return this.endpointRaw;
+    }
+
+    connect(endpoint: string) {
+        if (this.source && this.endpointRaw == endpoint) {
+            // avoid duplication
+            return
+        }
+        if (this.source) {
+            this.source.close();
+        }
+
+        this.endpointRaw = endpoint;
+        this.endpointPush = parseUrl(endpoint, '/sse', { sid: this.options.sid });
+        this.endpointEvents = parseUrl(endpoint, '/sse', { ...(this.options.params), sid: this.options.sid });
+
+        this.source = new EventSource(this.endpointEvents, {
             ...(this.options.cors ? { withCredentials: true } : {}),
         });
 
         this.source.onmessage = (event) => {
             log(TRANSPORT, 'message', event);
-            this.emit('message', event.data);
+            this.emit('message', this, event.data);
         };
 
         this.source.onerror = (event) => {
             log(TRANSPORT, 'error', event);
-            this.emit('error');
+            this.emit('error', this);
         };
 
         this.source.onopen = (event) => {
             log(TRANSPORT, 'open', event);
-            this.emit('open');
+            this.emit('open', this);
         };
     }
 
@@ -699,37 +957,51 @@ export class TransportSSE extends Events {
         }
         log(TRANSPORT, 'close');
         this.source.close();
-        this.emit('close');
+        this.emit('close', this);
+        this.source = null;
     }
+}
+
+
+export const Transports: { [key: string]: TransportConstructor } = {
+    "SSE": TransportSSE
 }
 
 /**
  * Timer to retry callback
  */
 export class Retry {
-    private tries = 0;
+    private _tries = 0;
     private timeout: any;
-    private readonly callback: (...args: any) => void;
+    private readonly callback: (retry: number) => void;
     private readonly intervals: number[];
     private readonly intervalMax: number;
 
-    constructor(callback: (...args: any) => void, intervals: number[]) {
+    constructor(callback: (retry: number) => void, intervals: number[]) {
         this.callback = callback;
         this.intervals = intervals.slice(0).sort();
         this.intervalMax = Math.max(...this.intervals);
     }
 
+    tries(): number {
+        return this._tries
+    }
+
+    lastInterval(): number {
+        return this.intervals[this._tries] || this.intervalMax;
+    }
+
     reset() {
-        this.tries = 0;
+        this._tries = 0;
         clearTimeout(this.timeout);
     }
 
     retry() {
         clearTimeout(this.timeout);
         this.timeout = setTimeout(() => {
-            this.tries++;
-            this.callback();
-        }, this.intervals[this.tries] || this.intervalMax);
+            this._tries++;
+            this.callback(this._tries);
+        }, this.intervals[this._tries] || this.intervalMax);
     }
 }
 
@@ -774,36 +1046,44 @@ function parseUrl(endpoint: string, suffix: string, params?: { [key: string]: an
     return basePath;
 }
 
-export const Transport = { SSE: typeof TransportSSE }
-
-export const Options: {
-    Debug: boolean;
-    [key: string]: any
-} = {
-    Debug: true,
-}
-
 export function encode(message: Message): string {
-    let { joinRef, ref, topic, event, payload } = message;    
+    let { joinRef, ref, topic, event, payload } = message;
     return JSON.stringify([MessageKindEnum.PUSH, joinRef, ref, topic, event, payload]);
 }
 
 export function decode(rawMessage: string): Message {
     // Push      = [kind, joinRef, ref,  topic, event, payload]
     // Reply     = [kind, joinRef, ref, status,        payload]
-    // Broadcast = [kind,                topic, event, payload]
+    // Broadcast = [kind,                topic, event, payload]    
     let [kind, joinRef, ref, topic, event, payload] = JSON.parse(rawMessage);
+    let countParts = 5;
     if (kind === MessageKindEnum.REPLY) {
+        countParts = 4;
         payload = { status: topic === 0 ? 'ok' : 'error', response: event };
         event = '_reply';
         topic = undefined;
     } else if (kind === MessageKindEnum.BROADCAST) {
+        countParts = 3;
         payload = topic;
         event = ref;
         topic = joinRef;
         joinRef = ref = undefined;
     }
-    return { joinRef, ref, topic, event, payload, kind };
+
+    // extract raw payload    
+    let payload_raw = '';
+    let lastIndexOfComma = -1;
+    for (let i = 0; i < countParts; i++) {
+        lastIndexOfComma = rawMessage.indexOf(',', lastIndexOfComma + 1);
+        if (lastIndexOfComma == -1) {
+            break
+        }
+    }
+    if (lastIndexOfComma != - 1) {
+        payload_raw = rawMessage.substring(lastIndexOfComma + 1, rawMessage.length - 1);
+    }
+
+    return { joinRef, ref, topic, event, payload, payload_raw, kind };
 }
 
 let logGroupLen = Math.max(TRANSPORT.length, CHANNEL.length, SOCKET.length);
@@ -828,5 +1108,80 @@ export function log(group: string, template: string, ...params: any) {
             `${`                           ${group}`.substr(-logGroupLen)}: ${template}`,
             ...params
         );
+    }
+}
+
+/**
+ * Structure used for deduplication algorithms
+ * 
+ * Example:
+ *      const history = new History(5);
+ *      let socket = new chain.Socket({
+ *          duplicated: (msg: Message) => { return history.exists(msg.payload.messageId) }
+ *      });
+ */
+export class History {
+    private readonly history: any = {};
+    private readonly ttlSeconds: number;
+
+    constructor(ttlSeconds?: number) {
+        this.ttlSeconds = Math.max(Math.round((ttlSeconds || 5)), 1);
+        setInterval(this.rotate.bind(this), 1000);
+    }
+
+    /**
+     * Checks if the given value exists in the history.
+     * 
+     * @param key 
+     * @param value 
+     * @returns 
+     */
+    exists(key: string): boolean {
+
+        let exists = false;
+
+        for (let i = 0; i < this.ttlSeconds; i++) {
+            let slice = this.history[`_${i}`];
+            if (slice && slice[key]) {
+                exists = true;
+                break
+            }
+        }
+
+        if (!this.history["_0"]) {
+            this.history["_0"] = {};
+        }
+        this.history["_0"][key] = true;
+
+        return exists;
+    }
+
+    /**
+     * Rotates the message history.
+     */
+    private rotate() {
+
+        /*
+        every second:
+            lastMessagesForDedup = {
+                "5": {}, // will be removed
+                "4": {}, // will be renamed to "5" (removing "5")
+                "3": {}, // will be renamed to "4"
+                "2": {}, // will be renamed to "3"      
+                "1": {}, // will be renamed to "2"
+                "0": {}, // will be renamed to "1"
+                // "0" = {} .. will be created (on next defaultDuplicated call)                    
+            }
+        */
+        for (let i = this.ttlSeconds; i > 0; i--) {
+            let secKey = `_${i}`;
+            if (this.history[secKey]) {
+                if (i == this.ttlSeconds) { // last
+                    delete this.history[secKey];
+                } else {
+                    // move
+                }
+            }
+        }
     }
 }

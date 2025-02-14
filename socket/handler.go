@@ -3,7 +3,9 @@ package socket
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/nidorx/chain"
 	"github.com/nidorx/chain/pkg"
@@ -110,6 +112,13 @@ func (h *Handler) Connect(endpoint string, params map[string]string) (session *S
 	return
 }
 
+func (h *Handler) GetSession(socketId string) (session *Session) {
+	h.sessionsMutex.RLock()
+	session = h.sessions[socketId]
+	h.sessionsMutex.RUnlock()
+	return
+}
+
 // Resume used by Transport, tries to recover the session if it still alive
 func (h *Handler) Resume(socketId string) *Session {
 	h.sessionsMutex.RLock()
@@ -127,39 +136,47 @@ func (h *Handler) Resume(socketId string) *Session {
 }
 
 // Dispatch Processes messages from Transport (client)
-func (h *Handler) Dispatch(payload []byte, session *Session) {
-	go func() {
-		// @todo: goroutine using ants
-		// @todo: defer recovery
+func (h *Handler) Dispatch(payload []byte, session *Session) (event string) {
+	// @todo: goroutine using ants
+	// @todo: defer recovery
 
-		message := getMessageAny()
-		if _, err := h.Serializer.Decode(payload, message); err != nil {
-			slog.Debug(
-				"[chain.socket] could not decode serialized data",
-				slog.Any("Error", err),
-				slog.Any("Payload", payload),
-			)
+	message := getMessageAny()
+	if _, err := h.Serializer.Decode(payload, message); err != nil {
+		slog.Debug(
+			"[chain.socket] could not decode serialized data",
+			slog.Any("Error", err),
+			slog.Any("Payload", payload),
+		)
 
-			putMessage(message)
-			return
-		}
+		putMessage(message)
+		return ""
+	}
 
-		switch message.Event {
-		case "_join":
-			h.handleJoin(message, session)
-		case "_leave":
-			h.handleLeave(message, session)
-		case "heartbeat":
-			h.handleHeartbeat(message, session)
-		default:
-			h.handleMessage(message, session)
-		}
-	}()
+	event = message.Event
+
+	switch event {
+	case "_join":
+		h.handleJoin(message, session)
+	case "_leave":
+		h.handleLeave(message, session)
+	// case "heartbeat":
+	// 	h.handleHeartbeat(message, session)
+	default:
+		go h.handleMessage(message, session)
+	}
+
+	return
 }
 
 // handleJoin Joins the channel in socket with authentication payload.
 func (h *Handler) handleJoin(message *Message, session *Session) {
 	topic := message.Topic
+
+	if strings.ContainsRune(topic, '*') {
+		h.pushIgnore(message, session, ErrJoinWildcardTopic)
+		return
+	}
+
 	channel := h.getChannel(topic)
 	if channel == nil {
 		slog.Info(
@@ -171,6 +188,7 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 		h.pushIgnore(message, session, ErrUnmatchedTopic)
 		return
 	}
+
 	socket := session.GetSocket(topic)
 	if socket != nil {
 		slog.Info(
@@ -220,14 +238,14 @@ func (h *Handler) handleJoin(message *Message, session *Session) {
 	h.push(message, session)
 }
 
-func (h *Handler) handleLeave(message *Message, info *Session) {
+func (h *Handler) handleLeave(message *Message, session *Session) {
 	topic := message.Topic
-	socket := info.GetSocket(topic)
+	socket := session.GetSocket(topic)
 	if socket != nil {
 		socket.status = StatusLeaving
 
 		// remove from transport
-		info.deleteSocket(topic)
+		session.deleteSocket(topic)
 
 		if socket.channel != nil {
 			socket.channel.handleLeave(socket, LeaveReasonLeave)
@@ -239,11 +257,20 @@ func (h *Handler) handleLeave(message *Message, info *Session) {
 	message.Kind = MessageTypeReply
 	message.Status = ReplyStatusCodeOk
 
-	h.push(message, info)
+	h.push(message, session)
+	if len(session.socketsByTopic) == 0 {
+		session.ScheduleShutdown(time.Second * 15)
+	}
 }
 
 func (h *Handler) handleMessage(message *Message, session *Session) {
 	topic := message.Topic
+
+	if strings.ContainsRune(message.Event, ',') {
+		h.pushIgnore(message, session, ErrInvalidEventName)
+		return
+	}
+
 	socket := session.GetSocket(topic)
 	if socket == nil {
 		slog.Info(
@@ -273,16 +300,16 @@ func (h *Handler) handleMessage(message *Message, session *Session) {
 	}
 }
 
-func (h *Handler) handleClose(info *Session) {
+func (h *Handler) handleClose(session *Session) {
 	h.sessionsMutex.Lock()
-	delete(h.sessions, info.Id())
+	delete(h.sessions, session.Id())
 	h.sessionsMutex.Unlock()
 
-	info.socketsMutex.Lock()
-	defer info.socketsMutex.Unlock()
+	session.socketsMutex.Lock()
+	defer session.socketsMutex.Unlock()
 
-	if info.socketsByTopic != nil {
-		for _, socket := range info.socketsByTopic {
+	if session.socketsByTopic != nil {
+		for _, socket := range session.socketsByTopic {
 			if socket.status != StatusLeaving {
 				if socket.channel != nil {
 					socket.channel.handleLeave(socket, LeaveReasonClose)
@@ -294,11 +321,11 @@ func (h *Handler) handleClose(info *Session) {
 	}
 }
 
-func (h *Handler) handleHeartbeat(message *Message, info *Session) {
+// func (h *Handler) handleHeartbeat(message *Message, info *Session) {
 
-}
+// }
 
-func (h *Handler) push(message *Message, info *Session) {
+func (h *Handler) push(message *Message, session *Session) {
 	defer putMessage(message)
 	var bytes []byte
 	var err error
@@ -316,7 +343,7 @@ func (h *Handler) push(message *Message, info *Session) {
 		)
 		return
 	}
-	info.Push(bytes)
+	session.Push(bytes)
 }
 
 func (h *Handler) pushIgnore(message *Message, info *Session, reason error) {

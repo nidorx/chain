@@ -1,6 +1,9 @@
 package socket
 
-import "fmt"
+import (
+	"errors"
+	"strings"
+)
 
 type Status int
 
@@ -12,7 +15,8 @@ const (
 )
 
 var (
-	ErrSocketNotJoined = fmt.Errorf("socket not joined")
+	ErrSocketNotJoined  = errors.New("socket not joined")
+	ErrInvalidEventName = errors.New("commas are not allowed in event")
 )
 
 // Socket Channel integration.
@@ -62,6 +66,13 @@ func (s *Socket) Set(key string, value any) {
 
 // Push message to client
 func (s *Socket) Push(event string, payload any) (err error) {
+	if strings.ContainsRune(event, ',') {
+		return ErrInvalidEventName
+	}
+
+	// if (event.includes(',')) {
+	// 	throw new Error("Commas are not allowed in event");
+	// }
 	if s.status != StatusJoined {
 		// can only be called after the socket has finished joining.
 		return ErrSocketNotJoined

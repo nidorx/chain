@@ -1,6 +1,7 @@
 package socket
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,18 +36,22 @@ type TransportSSE struct {
 func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoint string) {
 	endpoint = endpoint + "/sse"
 
-	salt := chain.HashMD5(endpoint)
-	t.sessionKey = sseSessionId + salt[:8]
+	t.sessionKey = sseSessionId + chain.HashMD5(endpoint)[:8]
 
 	sm := &session.Manager{
 		Config: session.Config{
-			Key:  t.sessionKey,
-			Path: endpoint,
+			Key:    t.sessionKey,
+			Path:   endpoint,
+			MaxAge: 4 * 60 * 60,
 		},
 		Store: &session.Cookie{},
 	}
 
 	if t.Cookie != nil {
+		if t.Cookie.Key != "" {
+			sm.Config.Key = t.Cookie.Key
+			t.sessionKey = sm.Config.Key
+		}
 		sm.Config.Domain = t.Cookie.Domain
 		sm.Config.MaxAge = t.Cookie.MaxAge
 		sm.Config.Secure = t.Cookie.Secure
@@ -155,7 +160,7 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 	// Publish the message.
 	router.POST(endpoint, func(ctx *chain.Context) {
 		var socketSession *Session
-		if socketSession = t.resumeSession(ctx, handler); socketSession == nil {
+		if socketSession = t.resumeSocketSession(ctx, handler); socketSession == nil {
 			ctx.WriteHeader(http.StatusGone)
 			return
 		}
@@ -166,7 +171,27 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 			return
 		}
 
-		socketSession.Dispatch(body)
+		// avoiding cookie oversized
+		event := socketSession.Dispatch(body)
+		if event == "_leave" || event == "_join" {
+			if cookieSession, cookieSidKey := t.getCookieSession(ctx); cookieSession != nil {
+				if event == "_leave" {
+					cookieSession.Delete(cookieSidKey)
+				} else {
+					// clear old sessions (broken conenction, etc)
+					for oldCookieSidKey, v := range cookieSession.Data() {
+						if oldCookieSidKey == cookieSidKey {
+							continue
+						}
+						if oldSid, ok := v.(string); ok {
+							if sess := handler.GetSession(oldSid); sess == nil {
+								cookieSession.Delete(oldCookieSidKey)
+							}
+						}
+					}
+				}
+			}
+		}
 		ctx.WriteHeader(http.StatusOK)
 	})
 
@@ -180,9 +205,9 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 		}
 
 		var socketSession *Session
-		if socketSession = t.resumeSession(ctx, handler); socketSession == nil {
+		if socketSession = t.resumeSocketSession(ctx, handler); socketSession == nil {
 			var err error
-			if socketSession, err = t.newSession(handler, ctx, endpoint); err != nil {
+			if socketSession, err = t.newSocketSession(handler, ctx, endpoint); err != nil {
 				ctx.Error("Could not initialize connection: "+err.Error(), http.StatusForbidden)
 				return
 			}
@@ -206,17 +231,26 @@ func (t *TransportSSE) Configure(handler *Handler, router *chain.Router, endpoin
 	})
 }
 
-func (t *TransportSSE) resumeSession(ctx *chain.Context, handler *Handler) *Session {
+func (t *TransportSSE) getCookieSession(ctx *chain.Context) (*session.Session, string) {
 	var sess *session.Session
 	var err error
 	if sess, err = session.FetchByKey(ctx, t.sessionKey); err != nil {
-		return nil
+		return nil, ""
 	}
 
-	// browser tab identifier
+	// browser tab/transfer identifier
 	sidKey := strings.TrimSpace(ctx.Request.URL.Query().Get("sid"))
 	if sidKey == "" {
 		sidKey = "sid"
+	}
+
+	return sess, sidKey
+}
+
+func (t *TransportSSE) resumeSocketSession(ctx *chain.Context, handler *Handler) *Session {
+	var sess, sidKey = t.getCookieSession(ctx)
+	if sess == nil {
+		return nil
 	}
 
 	sid := sess.Get(sidKey)
@@ -227,11 +261,11 @@ func (t *TransportSSE) resumeSession(ctx *chain.Context, handler *Handler) *Sess
 	return handler.Resume(sid.(string))
 }
 
-func (t *TransportSSE) newSession(handler *Handler, ctx *chain.Context, endpoint string) (skt *Session, err error) {
+func (t *TransportSSE) newSocketSession(handler *Handler, ctx *chain.Context, endpoint string) (skt *Session, err error) {
 
-	var sess *session.Session
-	if sess, err = session.FetchByKey(ctx, t.sessionKey); err != nil {
-		return
+	var sess, sidKey = t.getCookieSession(ctx)
+	if sess == nil {
+		return nil, errors.New("cannot initialize session")
 	}
 
 	params := map[string]string{}
@@ -244,11 +278,6 @@ func (t *TransportSSE) newSession(handler *Handler, ctx *chain.Context, endpoint
 		return
 	}
 
-	// browser tab identifier
-	sidKey := strings.TrimSpace(ctx.Request.URL.Query().Get("sid"))
-	if sidKey == "" {
-		sidKey = "sid"
-	}
 	sess.Put(sidKey, skt.Id())
 
 	return

@@ -1,6 +1,8 @@
 import * as chain from '/chain.js'
 
-const socket = new chain.Socket('/socket')
+const socket = new chain.Socket({
+    getNodes: async () => { return ['/socket'] }
+})
 socket.connect()
 
 const channel = socket.channel("chat:lobby", { param1: 'foo' })
