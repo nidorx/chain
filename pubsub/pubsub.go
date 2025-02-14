@@ -69,7 +69,7 @@ func Subscribe(topicPattern string, dispatcher Dispatcher) {
 	defer p.subscriptionsMutex.Unlock()
 	var sub *subscription
 
-	if sub = p.subscriptions.MatchExactly(topicPattern); sub == nil {
+	if sub = p.subscriptions.Get(topicPattern); sub == nil {
 		sub = &subscription{dispatchers: map[Dispatcher]int{}}
 		if err := p.subscriptions.Insert(topicPattern, sub); err != nil {
 			slog.Warn(
@@ -95,7 +95,7 @@ func Unsubscribe(topicPattern string, dispatcher Dispatcher) {
 	var sub *subscription
 	var exist bool
 
-	if sub = p.subscriptions.MatchExactly(topicPattern); sub == nil {
+	if sub = p.subscriptions.Get(topicPattern); sub == nil {
 		return
 	}
 

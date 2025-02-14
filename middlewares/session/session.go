@@ -15,6 +15,14 @@ type Session struct {
 	data  map[string]any
 }
 
+func (s *Session) Data() (data map[string]any) {
+	data = make(map[string]any, len(s.data))
+	for k, v := range s.data {
+		data[k] = v
+	}
+	return
+}
+
 // Put puts the specified `value` in the session for the given `key`.
 func (s *Session) Put(key string, value any) {
 	if s.state == none {

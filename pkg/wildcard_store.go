@@ -1,16 +1,16 @@
 package pkg
 
 import (
-	"fmt"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
 )
 
 var (
-	ErrInvalidPattern      = fmt.Errorf("invalid pattern")
-	ErrInvalidSplatPattern = fmt.Errorf("splat patterns must end with *")
-	ErrItemAlreadyExist    = fmt.Errorf("item already exist")
+	ErrInvalidPattern      = errors.New("invalid pattern")
+	ErrItemAlreadyExist    = errors.New("item already exist")
+	ErrInvalidSplatPattern = errors.New("splat patterns must end with *")
 )
 
 // WildcardStore utility to persist and search items using wildcards. Used for channels, topics and events
@@ -18,6 +18,7 @@ var (
 // IMPORTANT: Items should only persist during system startup.
 type WildcardStore[T any] struct {
 	mutex    sync.Mutex
+	all      map[string]T        // all elements, by key
 	exactly  map[string]T        // exactly match (Ex. /room:lobby)
 	wildcard []*wildcardEntry[T] // wildcard match (Ex. /room:*)
 }
@@ -28,8 +29,11 @@ type wildcardEntry[T any] struct {
 }
 
 // Match returns the exactly value corresponding to the first occurrence of the keyPattern that matches the given key
-func (s *WildcardStore[T]) MatchExactly(key string) (out T) {
-	if item, exist := s.exactly[key]; exist {
+func (s *WildcardStore[T]) Get(key string) (out T) {
+	if s.all == nil {
+		return
+	}
+	if item, exist := s.all[key]; exist {
 		out = item
 		return
 	}
@@ -39,9 +43,11 @@ func (s *WildcardStore[T]) MatchExactly(key string) (out T) {
 
 // Match returns the value corresponding to the first occurrence of the keyPattern that matches the given key
 func (s *WildcardStore[T]) Match(key string) (out T) {
-	if item, exist := s.exactly[key]; exist {
-		out = item
-		return
+	if s.exactly != nil {
+		if item, exist := s.exactly[key]; exist {
+			out = item
+			return
+		}
 	}
 
 	for _, entry := range s.wildcard {
@@ -60,8 +66,10 @@ func (s *WildcardStore[T]) Match(key string) (out T) {
 // MatchAll returns all existing values that match the given key
 func (s *WildcardStore[T]) MatchAll(key string) []T {
 	var items []T
-	if item, exist := s.exactly[key]; exist {
-		items = append(items, item)
+	if s.exactly != nil {
+		if item, exist := s.exactly[key]; exist {
+			items = append(items, item)
+		}
 	}
 
 	for _, entry := range s.wildcard {
@@ -77,6 +85,18 @@ func (s *WildcardStore[T]) MatchAll(key string) []T {
 }
 
 func (s *WildcardStore[T]) Insert(keyPattern string, value T) error {
+
+	if s.exactly == nil {
+		s.exactly = map[string]T{}
+	}
+
+	if s.all == nil {
+		s.all = map[string]T{}
+	}
+
+	if _, exist := s.all[keyPattern]; exist {
+		return ErrItemAlreadyExist
+	}
 
 	keyPattern = strings.TrimSpace(keyPattern)
 
@@ -107,17 +127,11 @@ func (s *WildcardStore[T]) Insert(keyPattern string, value T) error {
 		})
 
 		s.wildcard = wildcard
+		s.all[keyPattern] = value
 		return nil
 	}
 
-	if s.exactly == nil {
-		s.exactly = map[string]T{}
-	}
-
-	if _, exist := s.exactly[keyPattern]; exist {
-		return ErrItemAlreadyExist
-	}
-
+	s.all[keyPattern] = value
 	s.exactly[keyPattern] = value
 
 	return nil
