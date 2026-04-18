@@ -30,7 +30,16 @@ func (s *JsonSerializer) Decode(data []byte, v any) (any, error) {
 	return v, nil
 }
 
-// HashMD5 computing the MD5 checksum of strings
+// HashMD5 computes the MD5 checksum of a string and returns it as a hex-encoded string.
+//
+// Deprecated: MD5 is cryptographically broken and should not be used for security purposes.
+// MD5 is vulnerable to collision attacks (see https://en.wikipedia.org/wiki/MD5#Security).
+//
+// For security-sensitive applications, use:
+//   - HashXxh64 for fast, non-cryptographic checksums
+//   - crypto.SHA256 or crypto.SHA3 for cryptographic hashing
+//
+// This function is kept for backward compatibility only.
 func HashMD5(text string) string {
 	h := md5.New()
 	h.Write([]byte(text))

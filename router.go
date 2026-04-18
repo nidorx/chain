@@ -408,16 +408,15 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 		// execute after write hooks
 		rw.execAfterWriteHooksCalledByRouter()
+
+		// clear context when connection is closed
+		if ctx != nil {
+			r.poolPutContext(ctx)
+		}
 	}()
 
 	ctx = r.poolGetContext(req, w, "")
 	ctx.parsePathSegments()
-
-	go func() {
-		// clear context when connection is closed
-		<-ctx.Request.Context().Done()
-		r.poolPutContext(ctx)
-	}()
 
 	path := req.URL.Path
 

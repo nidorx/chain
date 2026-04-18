@@ -108,12 +108,16 @@ func (ctx *Context) GetCookie(name string) *http.Cookie {
 	return nil
 }
 
-// GetHeader gets the first value associated with the given key. If there are no values associated with the key,
-// GetHeader returns "".
-// It is case insensitive; textproto.CanonicalMIMEHeaderKey is used to canonicalize the provided key. Get assumes
-// that all keys are stored in canonical form. To use non-canonical keys, access the map directly.
+// GetHeader gets the first value associated with the given key from the request headers.
+// If there are no values associated with the key, GetHeader returns "".
+// It is case-insensitive; http.CanonicalHeaderKey is used to canonicalize the provided key.
+//
+// Example:
+//
+//	contentType := ctx.GetHeader("Content-Type")
+//	// Returns: "application/json"
 func (ctx *Context) GetHeader(key string) string {
-	return ctx.Writer.Header().Get(key)
+	return ctx.Request.Header.Get(key)
 }
 
 func filterFlags(content string) string {

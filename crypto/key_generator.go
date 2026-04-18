@@ -20,12 +20,15 @@ type KeyGenerator struct {
 
 // Generate Returns a derived key suitable for use.
 //
-//   - `iterations` - defaults to 1000 (increase to at least 2^16 if used for passwords);
+//   - `iterations` - defaults to 216,000 (2^16, OWASP recommended minimum for PBKDF2-SHA256);
 //   - `length`     - a length in octets for the derived key. Defaults to 32;
 //   - `digest`     - an hmac function to use as the pseudo-random function. Defaults to `sha256`;
+//
+// Security Note: The default of 216,000 iterations follows OWASP 2023 guidelines.
+// For password hashing, consider using Argon2 instead for better security.
 func (g *KeyGenerator) Generate(secret []byte, salt []byte, iterations int, length int, digest string) []byte {
 	if iterations < 1 {
-		iterations = 1000
+		iterations = 216000 // 2^16 - OWASP recommended minimum
 	}
 	if length < 1 {
 		length = 32
