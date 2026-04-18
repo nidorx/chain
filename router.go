@@ -270,6 +270,13 @@ func (r *Router) Use(args ...any) Group {
 				}
 				return next()
 			})
+		case Handle:
+			middlewares = append(middlewares, func(ctx *Context, next func() error) error {
+				if err := arg(ctx); err != nil {
+					return err
+				}
+				return next()
+			})
 		case func(*Context, func() error):
 			middlewares = append(middlewares, func(ctx *Context, next func() error) error {
 				arg(ctx, next)
