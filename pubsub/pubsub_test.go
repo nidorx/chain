@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/nidorx/chain"
-	"github.com/nidorx/chain/pkg"
 	"github.com/segmentio/ksuid"
 )
 
@@ -22,6 +21,16 @@ func init() {
 	if err := chain.SetSecretKeyBase("ZcbD0D29eYsGq89QjirJbPkw7Qxwxboy"); err != nil {
 		panic(err)
 	}
+}
+
+// testGetSelfID returns the current selfIdString for testing purposes.
+func testGetSelfID() string {
+	return getSelfIDString()
+}
+
+// testGetDirectTopic returns the current directTopic for testing purposes.
+func testGetDirectTopic() string {
+	return getDirectTopic()
 }
 
 func Test_PubSub_Broadcast_Dispatcher(t *testing.T) {
@@ -101,7 +110,7 @@ func Test_PubSub_Direct_Broadcast(t *testing.T) {
 	testClearPubsub()
 	testAdapter.clear()
 
-	destId := selfIdString
+	destId := testGetSelfID()
 
 	testAsRemote(func() {
 		if err := DirectBroadcast(destId, topic, message); err != nil {
@@ -138,26 +147,26 @@ func Test_PubSub_Direct_Broadcast(t *testing.T) {
 }
 
 func testAsRemote(fn func()) {
-	oSelfKSUID := selfId
-	oSelfBytes := selfIdBytes
-	oSelfString := selfIdString
+	// Backup current state using safe accessors
+	oSelfString := testGetSelfID()
+
+	// Set remote state using thread-safe setter
+	setSelfID(remoteId)
 
 	defer func() {
-		selfId = oSelfKSUID
-		selfIdBytes = oSelfBytes
-		selfIdString = oSelfString
+		// Restore original state - parse the KSUID from string
+		originalId, err := ksuid.Parse(oSelfString)
+		if err != nil {
+			panic(err)
+		}
+		setSelfID(originalId)
 	}()
-
-	selfId = remoteId
-	selfIdBytes = remoteIdBytes
-	selfIdString = remoteIdString
 
 	fn()
 }
 
 func testClearPubsub() {
-	p.subscriptions = &pkg.WildcardStore[*subscription]{}
-	p.unsubscribeTimers = map[string]*time.Timer{}
+	ResetPubsub()
 
 	SetAdapters([]AdapterConfig{{
 		Adapter:            testAdapter,

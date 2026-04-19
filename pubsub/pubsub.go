@@ -18,6 +18,7 @@ var (
 	selfIdBytes  = selfId.Bytes() // 20 bytes
 	selfIdString = selfId.String()
 	directTopic  = "direct:" + selfIdString
+	selfIdMutex  sync.RWMutex
 	ErrNoAdapter = errors.New("no adapter matches topic to broadcast the message")
 )
 
@@ -59,9 +60,55 @@ var p = &pubsub{
 	unsubscribeTimers: map[string]*time.Timer{},
 }
 
+// ResetPubsub resets the pubsub state for testing purposes.
+func ResetPubsub() {
+	p.subscriptionsMutex.Lock()
+	p.subscriptions = &pkg.WildcardStore[*subscription]{}
+	p.subscriptionsMutex.Unlock()
+
+	p.unsubscribeMutex.Lock()
+	p.unsubscribeTimers = map[string]*time.Timer{}
+	p.unsubscribeMutex.Unlock()
+}
+
 // Self get node id
 func Self() string {
+	selfIdMutex.RLock()
+	defer selfIdMutex.RUnlock()
 	return selfIdString
+}
+
+// setSelfID updates the self ID variables (primarily for testing).
+func setSelfID(id ksuid.KSUID) {
+	selfIdMutex.Lock()
+	defer selfIdMutex.Unlock()
+	selfId = id
+	selfIdBytes = id.Bytes()
+	selfIdString = id.String()
+	directTopic = "direct:" + selfIdString
+}
+
+// getSelfIDBytes returns a copy of selfIdBytes safely.
+func getSelfIDBytes() []byte {
+	selfIdMutex.RLock()
+	defer selfIdMutex.RUnlock()
+	b := make([]byte, len(selfIdBytes))
+	copy(b, selfIdBytes)
+	return b
+}
+
+// getSelfIDString returns selfIdString safely.
+func getSelfIDString() string {
+	selfIdMutex.RLock()
+	defer selfIdMutex.RUnlock()
+	return selfIdString
+}
+
+// getDirectTopic returns directTopic safely.
+func getDirectTopic() string {
+	selfIdMutex.RLock()
+	defer selfIdMutex.RUnlock()
+	return directTopic
 }
 
 func Subscribe(topicPattern string, dispatcher Dispatcher) {
@@ -117,7 +164,7 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	}
 
 	if config.Adapter.Name() == "dummy" {
-		dispatchMessage(topic, message, selfIdString)
+		dispatchMessage(topic, message, getSelfIDString())
 		return
 	}
 
@@ -132,7 +179,7 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	msgToSend := message
 
 	// [messageType: byte] [from: 20 bytes] [msgToSend: ...]
-	msgToSend = append(append([]byte{byte(MessageTypeBroadcast)}, selfIdBytes...), msgToSend...)
+	msgToSend = append(append([]byte{byte(MessageTypeBroadcast)}, getSelfIDBytes()...), msgToSend...)
 
 	// Check if we have compression enabled
 	if !config.DisableCompression {
@@ -199,7 +246,7 @@ func broadcastMessage(msgType MessageType, topic string, message []byte, options
 	}
 
 	if config.Adapter.Name() == "dummy" {
-		dispatchMessage(topic, message, selfIdString)
+		dispatchMessage(topic, message, getSelfIDString())
 		return
 	}
 
@@ -215,7 +262,7 @@ func broadcastMessage(msgType MessageType, topic string, message []byte, options
 	// [messageType: byte] [from: 20 bytes] [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
 	buf := &bytes.Buffer{}
 	buf.WriteByte(byte(msgType))
-	buf.Write(selfIdBytes)
+	buf.Write(getSelfIDBytes())
 	buf.Write(message)
 	msgToSend := buf.Bytes()
 
@@ -345,12 +392,12 @@ func Dispatch(topic string, message []byte) {
 
 		// Check if is a direct broadcast
 		if msgType == MessageTypeDirectBroadcast {
-			if topic != directTopic {
+			if topic != getDirectTopic() {
 				slog.Error(
 					"[chain.pubsub] invalid topic for remote direct broadcast message",
 					slog.String("Topic", topic),
 					slog.String("Adapter", config.Adapter.Name()),
-					slog.String("Expected", directTopic),
+					slog.String("Expected", getDirectTopic()),
 				)
 				return
 			}
@@ -368,7 +415,7 @@ func Dispatch(topic string, message []byte) {
 			toBytes := message[0:20]
 			message = message[20:]
 
-			if !bytes.Equal(selfIdBytes, toBytes) {
+			if !bytes.Equal(getSelfIDBytes(), toBytes) {
 				slog.Error(
 					"[chain.pubsub] invalid remote direct broadcast destination",
 					slog.String("Adapter", config.Adapter.Name()),
@@ -407,7 +454,7 @@ func Dispatch(topic string, message []byte) {
 // `topic` - The topic to broadcast to, ie: `"users:123"`
 // `message` - The payload of the broadcast
 func LocalBroadcast(topic string, message []byte) {
-	dispatchMessage(topic, message, selfIdString)
+	dispatchMessage(topic, message, getSelfIDString())
 }
 
 // SetAdapters configure the adapters topics.
@@ -422,11 +469,11 @@ func LocalBroadcast(topic string, message []byte) {
 //	})
 func SetAdapters(adapters []AdapterConfig) {
 
-	if config := GetAdapter(directTopic); config != nil {
+	if config := GetAdapter(getDirectTopic()); config != nil {
 		// direct broadcast
-		config.Adapter.Unsubscribe(directTopic)
+		config.Adapter.Unsubscribe(getDirectTopic())
 	}
-	defer trySubscribe(directTopic)
+	defer trySubscribe(getDirectTopic())
 
 	p.adapters = &pkg.WildcardStore[*AdapterConfig]{}
 	for _, config := range adapters {
@@ -493,7 +540,7 @@ func scheduleUnsubscribe(topic string) {
 func dispatchMessage(topic string, message []byte, from string) {
 	go func() {
 		if from == "" {
-			from = selfIdString
+			from = getSelfIDString()
 		}
 
 		// get subscriptions & dispatchers
