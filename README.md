@@ -5,6 +5,7 @@
         To create distributed systems in a simple, elegant and safe way.
     </p>    
 </div>
+
 ---
 
 Chain is a core library that tries to provide all the necessary machinery to create distributed systems in a simple,
