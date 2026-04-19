@@ -88,7 +88,7 @@ func main() {
 	api := r.Group("/api")
 	api.Use(func(ctx *chain.Context, next func() error) error {
 		if ctx.GetHeader("Authorization") == "" {
-			ctx.Unauthorized()
+			ctx.Unauthorized(map[string]string{"error": "missing authorization"})
 			return nil
 		}
 		return next()
@@ -132,8 +132,7 @@ func main() {
 		if err := ctx.BindJSON(&u); err != nil {
 			return err // automatically returns 400 with validation details
 		}
-		ctx.Created()
-		ctx.Json(u)
+		ctx.Created(u)
 		return nil
 	})
 
@@ -449,10 +448,22 @@ ctx.UserAgent()             // User-Agent
 ctx.Json(data)              // JSON response
 ctx.Write([]byte("raw"))    // Raw bytes
 ctx.Status(201)             // Set status code
-ctx.Created()               // 201 Created
+ctx.Status(201, "created")  // Status code with text content
+ctx.Status(201, []byte{})   // Status code with binary content
+ctx.Status(201, data)       // Status code with JSON content
+
+// Convenience methods (all accept optional content)
 ctx.OK()                    // 200 OK
+ctx.OK("success")           // 200 OK with text
+ctx.OK(data)                // 200 OK with JSON
+ctx.Created()               // 201 Created
+ctx.Created(data)           // 201 Created with JSON
+ctx.NoContent()             // 204 No Content
 ctx.BadRequest()            // 400 Bad Request
+ctx.BadRequest("error")     // 400 with custom message
+ctx.BadRequest(data)        // 400 with JSON error
 ctx.NotFound()              // 404 Not Found
+ctx.NotFound("missing")     // 404 with custom message
 ctx.Redirect("/new", 301)   // Redirect
 ctx.SetCookie(cookie)       // Set cookie
 ctx.ServeContent(data, name, modTime) // Serve with Range support

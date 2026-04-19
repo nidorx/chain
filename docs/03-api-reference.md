@@ -188,22 +188,90 @@ child.Destroy()
 
 ### Status Codes
 
-```go
-ctx.OK()                          // 200
-ctx.Created()                     // 201
-ctx.NoContent()                   // 204
-ctx.BadRequest()                  // 400
-ctx.Unauthorized()                // 401
-ctx.Forbidden()                   // 403
-ctx.NotFound()                    // 404
-ctx.TooManyRequests()             // 429
-ctx.InternalServerError()         // 500
-ctx.NotImplemented()              // 501
-ctx.ServiceUnavailable()          // 503
+All status methods accept optional content (string, []byte, or any for JSON).
 
-// Custom status code
-ctx.Status(http.StatusAccepted)   // 202
-ctx.WriteHeader(http.StatusOK)    // 202
+```go
+// Basic status code
+ctx.Status(http.StatusAccepted)             // 202
+ctx.WriteHeader(http.StatusOK)              // 200 (alias)
+
+// Status with text content
+ctx.Status(200, "OK")                       // 200 with text
+ctx.Status(404, "Not Found")                // 404 with text
+
+// Status with binary content
+ctx.Status(200, []byte{...})                // 200 with bytes
+
+// Status with JSON content
+ctx.Status(200, map[string]string{...})     // 200 with JSON
+ctx.Status(201, struct{...})                // 201 with JSON
+
+// Convenience methods (all accept optional content)
+ctx.OK()                                    // 200 OK
+ctx.OK("success")                           // 200 with text
+ctx.OK([]byte{...})                         // 200 with bytes
+ctx.OK(map[string]string{"msg": "ok"})      // 200 with JSON
+
+ctx.Created()                               // 201 Created
+ctx.Created("resource created")             // 201 with text
+ctx.Created(map[string]string{"id": "123"}) // 201 with JSON
+
+ctx.NoContent()                             // 204 No Content (no content accepted)
+
+ctx.BadRequest()                            // 400 Bad Request
+ctx.BadRequest("invalid input")             // 400 with custom message
+ctx.BadRequest(map[string]string{"error": "validation failed"}) // 400 with JSON
+
+ctx.Unauthorized()                          // 401 Unauthorized
+ctx.Unauthorized("login required")          // 401 with text
+ctx.Unauthorized(map[string]string{"error": "invalid token"})   // 401 with JSON
+
+ctx.Forbidden()                             // 403 Forbidden
+ctx.Forbidden("access denied")              // 403 with text
+ctx.Forbidden(map[string]string{"error": "insufficient permissions"}) // 403 with JSON
+
+ctx.NotFound()                              // 404 Not Found
+ctx.NotFound("resource missing")            // 404 with text
+ctx.NotFound(map[string]string{"error": "not found"}) // 404 with JSON
+
+ctx.TooManyRequests()                       // 429 Too Many Requests
+ctx.TooManyRequests("rate limit exceeded")  // 429 with text
+ctx.TooManyRequests(map[string]any{"retry_after": 60}) // 429 with JSON
+
+ctx.InternalServerError()                   // 500 Internal Server Error
+ctx.InternalServerError("server error")     // 500 with text
+ctx.InternalServerError(map[string]string{"error": "internal error"}) // 500 with JSON
+
+ctx.NotImplemented()                        // 501 Not Implemented
+ctx.NotImplemented("feature not available") // 501 with text
+ctx.NotImplemented(map[string]string{"error": "not implemented"}) // 501 with JSON
+
+ctx.ServiceUnavailable()                    // 503 Service Unavailable
+ctx.ServiceUnavailable("maintenance")       // 503 with text
+ctx.ServiceUnavailable(map[string]string{"error": "service unavailable"}) // 503 with JSON
+```
+
+#### Content Type Behavior
+
+When content is provided to status methods, the response content type is automatically determined:
+
+- **string**: Sent as plain text
+- **[]byte**: Sent as raw bytes
+- **any other type**: Encoded as JSON (Content-Type: application/json)
+
+#### Error Method
+
+The `Error` method provides specialized error handling with optional custom content:
+
+```go
+// Basic error response (plain text)
+ctx.Error("Error message", http.StatusBadRequest)
+
+// Error with custom text message
+ctx.Error("ignored", http.StatusBadRequest, "custom error message")
+
+// Error with JSON response (bypasses http.Error)
+ctx.Error("ignored", http.StatusBadRequest, map[string]string{"error": "validation failed"})
 ```
 
 ### JSON Response
