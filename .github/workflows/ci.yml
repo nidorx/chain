@@ -19,13 +19,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        go-version: ["1.22", "1.23", "1.24"]
+        go-version: ["1.25"]
         include:
           # Also test on latest stable Windows and macOS
           - os: windows-latest
-            go-version: "1.24"
+            go-version: "1.25"
           - os: macos-latest
-            go-version: "1.24"
+            go-version: "1.25"
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -68,7 +68,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: Download dependencies
@@ -121,7 +121,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: Run golangci-lint
@@ -145,7 +145,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: Run benchmarks
@@ -175,7 +175,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: Install govulncheck
