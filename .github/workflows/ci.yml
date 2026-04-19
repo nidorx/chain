@@ -1,0 +1,200 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  schedule:
+    # Run weekly on Monday at 9:00 UTC to catch any issues
+    - cron: "0 9 * * 1"
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Test
+  # ─────────────────────────────────────────────────────────────
+  test:
+    name: Test (Go ${{ matrix.go-version }} / ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        go-version: ["1.22", "1.23", "1.24"]
+        include:
+          # Also test on latest stable Windows and macOS
+          - os: windows-latest
+            go-version: "1.24"
+          - os: macos-latest
+            go-version: "1.24"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Run tests
+        run: go test -v -count=1 -shuffle=on ./...
+
+      - name: Run tests with race detector
+        if: runner.os == 'Linux'
+        run: go test -v -count=1 -race ./...
+
+  # ─────────────────────────────────────────────────────────────
+  # Coverage
+  # ─────────────────────────────────────────────────────────────
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests with coverage
+        run: go test -v -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Show coverage summary
+        run: |
+          echo "=== Coverage by Package ==="
+          go tool cover -func=coverage.out | grep -E "total:|context_binding|crypto/"
+          echo ""
+          echo "=== Total Coverage ==="
+          go tool cover -func=coverage.out | grep "total:"
+
+      - name: Generate HTML coverage report
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.out
+            coverage.html
+          retention-days: 30
+
+      - name: Check minimum coverage (60%)
+        run: |
+          TOTAL=$(go tool cover -func=coverage.out | grep "total:" | grep -oP '\d+\.\d+' | head -1)
+          echo "Total coverage: ${TOTAL}%"
+          # Fail if coverage drops below 60%
+          if (( $(echo "${TOTAL} < 60.0" | bc -l) )); then
+            echo "::error::Coverage ${TOTAL}% is below the 60% threshold"
+            exit 1
+          fi
+
+  # ─────────────────────────────────────────────────────────────
+  # Lint
+  # ─────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  # ─────────────────────────────────────────────────────────────
+  # Benchmarks
+  # ─────────────────────────────────────────────────────────────
+  benchmark:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem -count=3 ./... > benchmark-results.txt 2>&1 || true
+
+      - name: Show benchmark results
+        run: cat benchmark-results.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────
+  # Security Scan (govulncheck)
+  # ─────────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  # ─────────────────────────────────────────────────────────────
+  # Status Check (all jobs must pass)
+  # ─────────────────────────────────────────────────────────────
+  all-checks:
+    name: All Checks
+    needs: [test, coverage, lint, security]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check required jobs
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
