@@ -564,7 +564,7 @@ func Test_Validate_SliceOfStructs(t *testing.T) {
 			t.Error("expected validation error for slice with invalid item, got nil")
 		}
 
-		sliceErr, ok := err.(SliceValidationError)
+		sliceErr, ok := err.(SliceValidationErrors)
 		if !ok {
 			t.Errorf("expected SliceValidationError, got %T", err)
 		}
@@ -584,7 +584,7 @@ func Test_Validate_SliceOfStructs(t *testing.T) {
 			t.Error("expected validation error for slice with multiple invalid items, got nil")
 		}
 
-		sliceErr, ok := err.(SliceValidationError)
+		sliceErr, ok := err.(SliceValidationErrors)
 		if !ok {
 			t.Errorf("expected SliceValidationError, got %T", err)
 		}
@@ -604,7 +604,7 @@ func Test_Validate_SliceOfStructs(t *testing.T) {
 
 func Test_SliceValidationError_Error(t *testing.T) {
 	t.Run("single error", func(t *testing.T) {
-		err := SliceValidationError{
+		err := SliceValidationErrors{
 			errors.New("field is required"),
 		}
 		expected := "[0]: field is required"
@@ -614,7 +614,7 @@ func Test_SliceValidationError_Error(t *testing.T) {
 	})
 
 	t.Run("multiple errors", func(t *testing.T) {
-		err := SliceValidationError{
+		err := SliceValidationErrors{
 			errors.New("name is required"),
 			errors.New("price must be positive"),
 			errors.New("sku is invalid"),
@@ -626,14 +626,14 @@ func Test_SliceValidationError_Error(t *testing.T) {
 	})
 
 	t.Run("empty slice", func(t *testing.T) {
-		err := SliceValidationError{}
+		err := SliceValidationErrors{}
 		if err.Error() != "" {
 			t.Errorf("expected empty string, got '%s'", err.Error())
 		}
 	})
 
 	t.Run("nil errors in slice", func(t *testing.T) {
-		err := SliceValidationError{
+		err := SliceValidationErrors{
 			nil,
 			errors.New("second error"),
 			nil,
@@ -646,7 +646,7 @@ func Test_SliceValidationError_Error(t *testing.T) {
 	})
 
 	t.Run("first error nil", func(t *testing.T) {
-		err := SliceValidationError{
+		err := SliceValidationErrors{
 			nil,
 			errors.New("second"),
 		}
@@ -986,14 +986,14 @@ func Test_Validate_SkipBindingTag(t *testing.T) {
 
 func Test_SliceValidationError_ErrorFormatting(t *testing.T) {
 	t.Run("no errors returns empty string", func(t *testing.T) {
-		err := SliceValidationError{}
+		err := SliceValidationErrors{}
 		if got := err.Error(); got != "" {
 			t.Errorf("expected empty string, got '%s'", got)
 		}
 	})
 
 	t.Run("error at index zero", func(t *testing.T) {
-		err := SliceValidationError{errors.New("missing name")}
+		err := SliceValidationErrors{errors.New("missing name")}
 		expected := "[0]: missing name"
 		if got := err.Error(); got != expected {
 			t.Errorf("expected '%s', got '%s'", expected, got)
@@ -1001,7 +1001,7 @@ func Test_SliceValidationError_ErrorFormatting(t *testing.T) {
 	})
 
 	t.Run("errors at consecutive indices", func(t *testing.T) {
-		err := SliceValidationError{
+		err := SliceValidationErrors{
 			errors.New("name required"),
 			errors.New("email invalid"),
 			errors.New("age out of range"),
@@ -1013,7 +1013,7 @@ func Test_SliceValidationError_ErrorFormatting(t *testing.T) {
 	})
 
 	t.Run("nil error at first position", func(t *testing.T) {
-		err := SliceValidationError{
+		err := SliceValidationErrors{
 			nil,
 			errors.New("second error"),
 		}
@@ -1025,7 +1025,7 @@ func Test_SliceValidationError_ErrorFormatting(t *testing.T) {
 	})
 
 	t.Run("nil error at middle position", func(t *testing.T) {
-		err := SliceValidationError{
+		err := SliceValidationErrors{
 			errors.New("first error"),
 			nil,
 			errors.New("third error"),

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"math/rand"
@@ -21,10 +22,11 @@ import (
 
 var (
 	//go:embed public
-	staticFs     embed.FS
-	staticDir    = "public"
-	lastPortUsed = 8080
-	cluster      = map[int]*http.Server{}
+	staticFs  embed.FS
+	staticDir = "public"
+	portSeq   = 8080
+	portSeqMu = sync.Mutex{}
+	cluster   = map[string]*http.Server{}
 )
 
 func main() {
@@ -34,8 +36,6 @@ func main() {
 		panic(err)
 	}
 
-	initPublisher()
-
 	router := chain.New()
 	router.GET("/*", createStaticFileHandler())
 	router.GET("/node", listNodeHandler)
@@ -43,8 +43,10 @@ func main() {
 	router.DELETE("/node", deleteNodeHandler)
 	socket.ClientJsHandler(router, "/") // "/chain.js"
 
-	port := fmt.Sprintf("%d", lastPortUsed)
+	port := nextPort()
 	log.Printf("Listening on :%s...\n", port)
+
+	initPublisher()
 
 	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), router); err != nil {
 		log.Fatalf("ListenAndServe: %v", err)
@@ -73,14 +75,14 @@ func initPublisher() {
 func deleteNodeHandler(ctx *chain.Context) {
 	if len(cluster) > 0 {
 		for {
-			toRemove := 0
+			toRemove := ""
 			for port := range cluster {
 				if rand.Intn(100) > 50 {
 					toRemove = port
 					break
 				}
 			}
-			if toRemove > 0 {
+			if toRemove != "" {
 				sctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 				if err := cluster[toRemove].Shutdown(sctx); err != nil {
 					cluster[toRemove].Close()
@@ -94,16 +96,24 @@ func deleteNodeHandler(ctx *chain.Context) {
 }
 
 func listNodeHandler(ctx *chain.Context) {
-	var nodes []int
+	var nodes []string
 	for port, _ := range cluster {
 		nodes = append(nodes, port)
 	}
 	ctx.Json(nodes)
 }
 
+func nextPort() string {
+	portSeqMu.Lock()
+	defer func() {
+		portSeq++
+		portSeqMu.Unlock()
+	}()
+	return fmt.Sprintf("%d", portSeq)
+}
+
 func addNodeHandler(ctx *chain.Context) {
-	lastPortUsed++
-	port := fmt.Sprintf("%d", lastPortUsed)
+	port := nextPort()
 
 	channel := socket.NewChannel("chat:*", func(channel *socket.Channel) {
 
@@ -168,7 +178,7 @@ func addNodeHandler(ctx *chain.Context) {
 		}
 	}()
 
-	cluster[lastPortUsed] = server
+	cluster[port] = server
 
 	if ctx != nil {
 		ctx.OK()

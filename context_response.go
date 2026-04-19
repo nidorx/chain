@@ -200,18 +200,29 @@ func (ctx *Context) WriteHeader(statusCode int) {
 }
 
 // WriteHeader sends an HTTP response header with the provided status code.
-func (ctx *Context) Status(statusCode int) {
-	ctx.WriteHeader(statusCode)
+func (ctx *Context) Status(code int, v ...any) {
+	ctx.WriteHeader(code)
+	if len(v) > 0 {
+		switch v0 := v[0].(type) {
+		case string:
+			ctx.ServeContent([]byte(v0), "", UnixEpoch)
+		case []byte:
+			ctx.ServeContent(v0, "", UnixEpoch)
+		default:
+			// json
+			ctx.Json(v0)
+		}
+	}
 }
 
 // Created sends an HTTP response header with the 200 OK status code.
-func (ctx *Context) OK() {
-	ctx.Status(http.StatusOK)
+func (ctx *Context) OK(v ...any) {
+	ctx.Status(http.StatusOK, v...)
 }
 
 // Created sends an HTTP response header with the 201 Created status code.
-func (ctx *Context) Created() {
-	ctx.Status(http.StatusCreated)
+func (ctx *Context) Created(v ...any) {
+	ctx.Status(http.StatusCreated, v...)
 }
 
 // Created sends an HTTP response header with the 204 No Content status code.
@@ -222,46 +233,58 @@ func (ctx *Context) NoContent() {
 // Error replies to the request with the specified error message and HTTP code.
 // It does not otherwise end the request; the caller should ensure no further writes are done to w.
 // The error message should be plain text.
-func (ctx *Context) Error(error string, code int) {
-	http.Error(ctx.Writer, error, code)
+func (ctx *Context) Error(msg string, code int, v ...any) {
+	if len(v) == 0 {
+		http.Error(ctx.Writer, msg, code)
+	} else {
+		switch v0 := v[0].(type) {
+		case string:
+			http.Error(ctx.Writer, v0, code)
+		case []byte:
+			http.Error(ctx.Writer, string(v0), code)
+		default:
+			// json
+			ctx.Status(code, v0)
+		}
+	}
 }
 
 // BadRequest replies to the request with an HTTP 400 bad request error.
-func (ctx *Context) BadRequest() {
-	ctx.Error("400 Bad Request", http.StatusBadRequest)
+func (ctx *Context) BadRequest(v ...any) {
+	ctx.Error("400 Bad Request", http.StatusBadRequest, v...)
 }
 
 // Unauthorized replies to the request with an HTTP 401 Unauthorized error.
-func (ctx *Context) Unauthorized() {
-	ctx.Error("401 Unauthorized", http.StatusUnauthorized)
+func (ctx *Context) Unauthorized(v ...any) {
+	ctx.Error("401 Unauthorized", http.StatusUnauthorized, v...)
 }
 
 // Unauthorized replies to the request with an HTTP 403 Forbidden error.
-func (ctx *Context) Forbidden() {
-	ctx.Error("403 Forbidden", http.StatusForbidden)
+func (ctx *Context) Forbidden(v ...any) {
+	ctx.Error("403 Forbidden", http.StatusForbidden, v...)
 }
 
 // NotFound replies to the request with an HTTP 404 not found error.
-func (ctx *Context) NotFound() {
-	http.NotFound(ctx.Writer, ctx.Request)
+func (ctx *Context) NotFound(v ...any) {
+	ctx.Error("404 Not Found", http.StatusNotFound, v...)
 }
 
 // TooManyRequests replies to the request with an HTTP 429 Too Many Requests error.
-func (ctx *Context) TooManyRequests() {
-	ctx.Error("429 Too Many Requests", http.StatusTooManyRequests)
+func (ctx *Context) TooManyRequests(v ...any) {
+	ctx.Error("429 Too Many Requests", http.StatusTooManyRequests, v...)
 }
 
 // InternalServerError replies to the request with an HTTP 500 Internal Server Error error.
-func (ctx *Context) InternalServerError() {
-	ctx.Error("500 Internal Server Error", http.StatusInternalServerError)
+func (ctx *Context) InternalServerError(v ...any) {
+	ctx.Error("500 Internal Server Error", http.StatusInternalServerError, v...)
 }
 
 // NotImplemented replies to the request with an HTTP 501 Not Implemented error.
-func (ctx *Context) NotImplemented() {
-	ctx.Error("501 Not Implemented", http.StatusNotImplemented)
+func (ctx *Context) NotImplemented(v ...any) {
+	ctx.Error("501 Not Implemented", http.StatusNotImplemented, v...)
 }
 
 // ServiceUnavailable replies to the request with an HTTP 503 Service Unavailable error.
-func (ctx *Context) ServiceUnavailable() {
-	ctx.Error("503 Service Unavailable", http.StatusServiceUnavailable)
+func (ctx *Context) ServiceUnavailable(v ...any) {
+	ctx.Error("503 Service Unavailable", http.StatusServiceUnavailable, v...)
 }

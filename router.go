@@ -17,6 +17,9 @@ import (
 
 // Router is a high-performance router.
 type Router struct {
+	// base path
+	path string
+
 	registries map[string]*Registry
 
 	contextPool sync.Pool
@@ -86,7 +89,7 @@ type Router struct {
 }
 
 func (r *Router) Group(route string) Group {
-	return &RouterGroup{p: route, r: r}
+	return &RouterGroup{path: route, router: r}
 }
 
 // GET is a shortcut for router.handleFunc(http.MethodGet, Route, handle)
@@ -239,7 +242,7 @@ func (r *Router) Use(args ...any) (Group, error) {
 	var methodP string
 	var middlewares []func(ctx *Context, next func() error) error
 
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		switch arg := args[i].(type) {
 		case string:
 			if path == "" {
