@@ -145,8 +145,8 @@ func (r *Router) Handle(method string, route string, handle any) error {
 
 	route = pkg.PathClean(route)
 
-	if len(route) < 1 || route[0] != '/' {
-		return ErrInvalidPath
+	if err := ValidateRoutePath(route); err != nil {
+		return err
 	}
 
 	if handle == nil {
@@ -169,7 +169,9 @@ func (r *Router) Handle(method string, route string, handle any) error {
 	if handler, err := Handler(handle); err != nil {
 		return err
 	} else {
-		registry.addHandle(route, handler)
+		if err := registry.addHandle(route, handler); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -232,7 +234,7 @@ func Handler(handle any) (h Handle, err error) {
 //	    println(ctx.GetParam("filepath"))
 //	    return ctx.NextFunc()
 //	})
-func (r *Router) Use(args ...any) Group {
+func (r *Router) Use(args ...any) (Group, error) {
 	var path string
 	var methodP string
 	var middlewares []func(ctx *Context, next func() error) error
@@ -312,7 +314,7 @@ func (r *Router) Use(args ...any) Group {
 				return next()
 			})
 		default:
-			panic(fmt.Sprintf("[chain] invalid middleware. middleware: %s", reflect.TypeOf(arg).String()))
+			return nil, fmt.Errorf("%w: %s", ErrInvalidMiddleware, reflect.TypeOf(arg).String())
 		}
 	}
 
@@ -348,10 +350,12 @@ func (r *Router) Use(args ...any) Group {
 			registry = &Registry{}
 			r.registries[method] = registry
 		}
-		registry.addMiddleware(path, middlewares)
+		if err := registry.addMiddleware(path, middlewares); err != nil {
+			return nil, err
+		}
 	}
 
-	return r
+	return r, nil
 }
 
 // Lookup finds the Route and parameters for the given Route and assigns them to the given Context.

@@ -63,7 +63,10 @@ func Test_PathInfo_extract(t *testing.T) {
 	}
 	for _, tt := range routes {
 		t.Run(tt.path, func(t *testing.T) {
-			a := ParseRouteInfo(tt.path)
+			a, err := ParseRouteInfo(tt.path)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			//RouteInfo{
 			//	path: "/doc/", segments: 1, hasStatic: true, hasParameter: false, hasWildcard: false, minLength: 4,
 			//	types: []rune{'.'}, positions: []int{1, 3}, sizes: []int{3}, static: []int{0}, parameter: nil}
@@ -109,8 +112,14 @@ func Test_PathInfo_MaybeMatches(t *testing.T) {
 	}
 	for _, tt := range routes {
 		t.Run(tt.first, func(t *testing.T) {
-			first := ParseRouteInfo(tt.first)
-			second := ParseRouteInfo(tt.second)
+			first, err := ParseRouteInfo(tt.first)
+			if err != nil {
+				t.Fatalf("unexpected error for first: %v", err)
+			}
+			second, err := ParseRouteInfo(tt.second)
+			if err != nil {
+				t.Fatalf("unexpected error for second: %v", err)
+			}
 			matches := first.Matches(second)
 			if matches != tt.expected {
 				t.Errorf("RouteInfo.Matches(string) | invalid \n   actual: %v\n expected: %v", matches, tt.expected)
@@ -173,7 +182,10 @@ func Test_PathInfo_Match(t *testing.T) {
 	}
 	for _, tt := range routes {
 		t.Run(tt.route, func(t *testing.T) {
-			info := ParseRouteInfo(tt.route)
+			info, err := ParseRouteInfo(tt.route)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			ctx := route.poolGetContext(nil, nil, tt.path)
 			ctx.parsePathSegments()
 			match, paramNames, paramValues := info.Match(ctx)

@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -45,18 +46,21 @@ func (r *Registry) findHandleCaseInsensitive(ctx *Context) *Route {
 	return r.storage.lookupCaseInsensitive(ctx)
 }
 
-func (r *Registry) addHandle(path string, handle Handle) {
+func (r *Registry) addHandle(path string, handle Handle) error {
 	if r.routes == nil {
 		r.routes = []*Route{}
 	}
 
-	details := ParseRouteInfo(path)
+	details, err := ParseRouteInfo(path)
+	if err != nil {
+		return err
+	}
 
 	// avoid conflicts
 	for _, route := range r.routes {
 		if details.conflictsWith(route.Info) {
 			slog.Error("[chain] wildcard conflicts", slog.String("new", details.path), slog.String("existing", route.Info.path))
-			panic("[chain] wildcard conflicts")
+			return fmt.Errorf("[chain] wildcard conflicts: new=%s existing=%s", details.path, route.Info.path)
 		}
 	}
 
@@ -67,7 +71,7 @@ func (r *Registry) addHandle(path string, handle Handle) {
 
 		r.canBeStatic[len(path)] = true
 		r.static[path] = r.createRoute(handle, details)
-		return
+		return nil
 	}
 
 	if r.storage == nil {
@@ -75,6 +79,7 @@ func (r *Registry) addHandle(path string, handle Handle) {
 	}
 
 	r.storage.add(r.createRoute(handle, details))
+	return nil
 }
 
 func (r *Registry) createRoute(handle Handle, info *RouteInfo) *Route {
@@ -96,25 +101,31 @@ func (r *Registry) createRoute(handle Handle, info *RouteInfo) *Route {
 	return route
 }
 
-func (r *Registry) addMiddleware(path string, middlewares []func(ctx *Context, next func() error) error) {
+func (r *Registry) addMiddleware(path string, middlewares []func(ctx *Context, next func() error) error) error {
 	if r.middlewares == nil {
 		r.middlewares = []*Middleware{}
 	}
 
 	for _, middleware := range middlewares {
-		info := &Middleware{
-			Path:   ParseRouteInfo(path),
+		info, err := ParseRouteInfo(path)
+		if err != nil {
+			return err
+		}
+
+		mw := &Middleware{
+			Path:   info,
 			Handle: middleware,
 		}
 
-		r.middlewares = append(r.middlewares, info)
+		r.middlewares = append(r.middlewares, mw)
 
 		// add this MiddlewareFunc to all compatible routes
 		for _, route := range r.routes {
-			if route.middlewaresAdded[info] != true && info.Path.Matches(route.Info) {
-				route.middlewaresAdded[info] = true
-				route.Middlewares = append(route.Middlewares, info)
+			if route.middlewaresAdded[mw] != true && mw.Path.Matches(route.Info) {
+				route.middlewaresAdded[mw] = true
+				route.Middlewares = append(route.Middlewares, mw)
 			}
 		}
 	}
+	return nil
 }

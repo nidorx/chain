@@ -1,13 +1,15 @@
 package chain
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 )
 
-// BodyBytes get body as array of bytes
+// BodyBytes get body as array of bytes.
+// It respects the MaxBodySize limit if set on the context.
 func (ctx *Context) BodyBytes() (body []byte, err error) {
 	if cb, exist := ctx.Get(BodyBytesKey); exist && cb != nil {
 		if cbb, ok := cb.([]byte); ok {
@@ -16,7 +18,15 @@ func (ctx *Context) BodyBytes() (body []byte, err error) {
 	}
 
 	if body == nil {
-		body, err = io.ReadAll(ctx.Request.Body)
+		// Check content length against max body size
+		if ctx.Request.ContentLength > 0 {
+			maxSize := ctx.getMaxBodySize()
+			if ctx.Request.ContentLength > maxSize {
+				return nil, fmt.Errorf("%w: content-length %d exceeds maximum %d bytes", ErrRequestBodyTooLarge, ctx.Request.ContentLength, maxSize)
+			}
+		}
+
+		body, err = io.ReadAll(http.MaxBytesReader(ctx.Writer, ctx.Request.Body, ctx.getMaxBodySize()))
 		if err != nil {
 			return
 		}
@@ -24,6 +34,21 @@ func (ctx *Context) BodyBytes() (body []byte, err error) {
 	}
 
 	return
+}
+
+// getMaxBodySize returns the maximum body size, defaulting to 10MB
+func (ctx *Context) getMaxBodySize() int64 {
+	if maxSize, ok := ctx.Get("max_body_size"); ok {
+		if size, ok := maxSize.(int64); ok {
+			return size
+		}
+	}
+	return DefaultMaxRequestBodySize
+}
+
+// SetMaxBodySize sets the maximum request body size for this context
+func (ctx *Context) SetMaxBodySize(size int64) {
+	ctx.Set("max_body_size", size)
 }
 
 // GetParam returns the value of the first Param which key matches the given name.
@@ -118,6 +143,24 @@ func (ctx *Context) GetCookie(name string) *http.Cookie {
 //	// Returns: "application/json"
 func (ctx *Context) GetHeader(key string) string {
 	return ctx.Request.Header.Get(key)
+}
+
+// GetHeaderValidated gets a header value with validation for size and format
+func (ctx *Context) GetHeaderValidated(key string, maxLength int) (string, error) {
+	value := ctx.GetHeader(key)
+	if err := ValidateHeaderValue(key, value, maxLength); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+// QueryParamValidated returns a validated query parameter with length checking
+func (ctx *Context) QueryParamValidated(name string, maxLength int) (string, error) {
+	value := ctx.QueryParam(name)
+	if err := ValidateQueryParameter(name, value, maxLength); err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 func filterFlags(content string) string {

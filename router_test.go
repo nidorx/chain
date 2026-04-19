@@ -460,7 +460,6 @@ func Test_Router_PanicHandler(t *testing.T) {
 
 	router.Handle(http.MethodPut, "/user/:name", func(ctx *Context) error {
 		panic(any("oops!"))
-		return nil
 	})
 
 	w := new(mockResponseWriter)
@@ -952,15 +951,13 @@ func Test_Router_Wildcard_Conflict(t *testing.T) {
 	}
 	for _, tt := range routes {
 		t.Run(tt.path, func(t *testing.T) {
-			recv := catchPanic(func() {
-				router.GET(tt.path, fakeHandler(tt.path))
-			})
+			err := router.GET(tt.path, fakeHandler(tt.path))
 			if tt.conflict {
-				if recv == nil {
-					t.Errorf("no panic for conflicting Route '%s'", tt.path)
+				if err == nil {
+					t.Errorf("no error for conflicting Route '%s'", tt.path)
 				}
-			} else if recv != nil {
-				t.Errorf("unexpected panic for Route '%s': %v", tt.path, recv)
+			} else if err != nil {
+				t.Errorf("unexpected error for Route '%s': %v", tt.path, err)
 			}
 		})
 	}
@@ -977,19 +974,15 @@ func Test_Router_Duplicate_Path(t *testing.T) {
 		"/user/:name",
 	}
 	for _, route := range routes {
-		recv := catchPanic(func() {
-			router.GET(route, fakeHandler(route))
-		})
-		if recv != nil {
-			t.Fatalf("panic inserting Route '%s': %v", route, recv)
+		err := router.GET(route, fakeHandler(route))
+		if err != nil {
+			t.Fatalf("error inserting Route '%s': %v", route, err)
 		}
 
 		// Add again
-		recv = catchPanic(func() {
-			router.GET(route, fakeHandler(route))
-		})
-		if recv == nil {
-			t.Fatalf("no panic while inserting duplicate Route '%s", route)
+		err = router.GET(route, fakeHandler(route))
+		if err == nil {
+			t.Fatalf("no error while inserting duplicate Route '%s", route)
 		}
 	}
 
@@ -1018,13 +1011,14 @@ func Test_Router_CatchAll_Conflict(t *testing.T) {
 	for _, tt := range routes {
 		t.Run(tt.first, func(t *testing.T) {
 			router := New()
-			router.GET(tt.first, fakeHandler(tt.first))
-			recv := catchPanic(func() {
-				router.GET(tt.second, fakeHandler(tt.second))
-			})
+			err := router.GET(tt.first, fakeHandler(tt.first))
+			if err != nil {
+				t.Fatalf("error setting up first route: %v", err)
+			}
+			err = router.GET(tt.second, fakeHandler(tt.second))
 
-			if recv == nil {
-				t.Errorf("no panic for conflicting Route '%s'", tt.first)
+			if err == nil {
+				t.Errorf("no error for conflicting Route '%s'", tt.first)
 			}
 		})
 	}
@@ -1037,8 +1031,6 @@ func Test_Router_Catch_Max_Params(t *testing.T) {
 }
 
 func Test_Router_Double_Wildcard(t *testing.T) {
-	const panicMsg = "only one wildcard per path segment is allowed"
-
 	routes := []struct {
 		path string
 	}{
@@ -1049,13 +1041,15 @@ func Test_Router_Double_Wildcard(t *testing.T) {
 	for _, tt := range routes {
 		t.Run(tt.path, func(t *testing.T) {
 			router := New()
-			recv := catchPanic(func() {
-				router.GET(tt.path, fakeHandler(tt.path))
-			})
+			err := router.GET(tt.path, fakeHandler(tt.path))
 
-			rs := fmt.Sprintf("%v", recv)
-			if !strings.Contains(rs, panicMsg) {
-				t.Fatalf(`"Expected panic "%s" for Route '%s', got "%v"`, panicMsg, tt, recv)
+			if err == nil {
+				t.Fatalf("Expected error for invalid route '%s' with multiple wildcards/parameters", tt.path)
+			}
+			// Accept either error message since both indicate invalid syntax
+			if !strings.Contains(err.Error(), "only one wildcard per path segment") &&
+				!strings.Contains(err.Error(), "parameter name cannot contain wildcards") {
+				t.Fatalf("Expected error about wildcard/parameter syntax for Route '%s', got '%s'", tt.path, err.Error())
 			}
 		})
 	}

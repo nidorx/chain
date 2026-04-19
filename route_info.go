@@ -226,7 +226,8 @@ func (d *RouteInfo) String() string {
 }
 
 // ParseRouteInfo obtém informações sobre um path dinamico.
-func ParseRouteInfo(pathOrig string) *RouteInfo {
+// Returns an error if the path contains invalid route syntax.
+func ParseRouteInfo(pathOrig string) (*RouteInfo, error) {
 
 	// uses a path with at the beginning and end to facilitate the loop (details.segments++ rule)
 	if !strings.HasPrefix(pathOrig, string(separator)) {
@@ -236,8 +237,8 @@ func ParseRouteInfo(pathOrig string) *RouteInfo {
 	var (
 		path              = pathOrig[0:]
 		details           = &RouteInfo{path: pathOrig}
-		pathSegments      [32]int
 		staticLength      = 0
+		pathSegments      [32]int
 		pathSegmentsCount = parsePathSegments(pathOrig, &pathSegments)
 	)
 
@@ -245,11 +246,11 @@ func ParseRouteInfo(pathOrig string) *RouteInfo {
 		part := path[pathSegments[i]+1 : pathSegments[i+1]]
 		if strings.IndexByte(part, parameter) == 0 {
 			if len(part) == 1 {
-				panic(fmt.Sprintf("[chain] is necessary to inform the name of the parameter. path: %s", path))
+				return nil, fmt.Errorf("%w: path: %s", ErrEmptyParameterName, path)
 			}
 			paramName := part[1:]
 			if strings.IndexByte(paramName, wildcard) >= 0 || strings.IndexByte(paramName, parameter) >= 0 {
-				panic(fmt.Sprintf("[chain] only one wildcard per path segment is allowed. path: %s", path))
+				return nil, fmt.Errorf("%w: path: %s", ErrInvalidParameterName, path)
 			}
 			details.hasParameter = true
 			details.segments = append(details.segments, string(parameter))
@@ -257,14 +258,14 @@ func ParseRouteInfo(pathOrig string) *RouteInfo {
 			details.paramsIndex = append(details.paramsIndex, i)
 		} else if strings.IndexByte(part, wildcard) == 0 {
 			if details.hasWildcard {
-				panic(fmt.Sprintf("[chain] catch-all routes are only allowed at the end of the path. path: %s", path))
+				return nil, fmt.Errorf("%w: path: %s", ErrWildcardNotAtEnd, path)
 			}
 			paramName := part[1:]
 			if paramName == "" {
 				paramName = "filepath"
 			}
 			if strings.IndexByte(paramName, wildcard) >= 0 || strings.IndexByte(paramName, parameter) >= 0 {
-				panic(fmt.Sprintf("[chain] only one wildcard per path segment is allowed. path: %s", path))
+				return nil, fmt.Errorf("%w: path: %s", ErrDuplicateWildcard, path)
 			}
 			details.hasWildcard = true
 			details.segments = append(details.segments, string(wildcard))
@@ -304,7 +305,7 @@ func ParseRouteInfo(pathOrig string) *RouteInfo {
 
 	details.pattern = route.String()
 
-	return details
+	return details, nil
 }
 
 func parsePathSegments(path string, pathSegments *[32]int) (pathSegmentsCount int) {

@@ -8,7 +8,7 @@ type Group interface {
 	PUT(route string, handle any) error
 	PATCH(route string, handle any) error
 	DELETE(route string, handle any) error
-	Use(args ...any) Group
+	Use(args ...any) (Group, error)
 	Group(route string) Group
 	Handle(method string, route string, handle any) error
 	Configure(route string, configurator RouteConfigurator)
@@ -26,7 +26,7 @@ func (r *RouterGroup) POST(route string, handle any) error    { return r.r.POST(
 func (r *RouterGroup) PUT(route string, handle any) error     { return r.r.PUT(r.p+route, handle) }
 func (r *RouterGroup) PATCH(route string, handle any) error   { return r.r.PATCH(r.p+route, handle) }
 func (r *RouterGroup) DELETE(route string, handle any) error  { return r.r.DELETE(r.p+route, handle) }
-func (r *RouterGroup) Use(args ...any) Group                  { return r.r.Use(args...) }
+func (r *RouterGroup) Use(args ...any) (Group, error)         { return r.r.Use(args...) }
 func (r *RouterGroup) Group(route string) Group               { return &RouterGroup{r.p + route, r.r} }
 func (r *RouterGroup) Handle(method string, route string, handle any) error {
 	return r.r.Handle(method, r.p+route, handle)

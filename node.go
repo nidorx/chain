@@ -1,22 +1,25 @@
 package chain
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"strings"
 )
 
 var (
-	nodeName string
+	nodeName           string
+	ErrInvalidNodeName = errors.New("incorrect FQDN node name (example: node@localhost)")
 )
 
-func SetNodeName(name string) {
+func SetNodeName(name string) error {
 	//lib.Log("Start node with name %q and cookie %q", name, cookie)
 	if len(strings.Split(name, "@")) != 2 {
-		panic(fmt.Errorf("incorrect FQDN node name (example: node@localhost)"))
+		return fmt.Errorf("%w: got %q", ErrInvalidNodeName, name)
 	}
 
 	nodeName = name
+	return nil
 }
 
 func NodeName() string {
