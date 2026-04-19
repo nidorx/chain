@@ -21,7 +21,7 @@ linters:
     - prealloc
     - unparam
 
-linters-settings:
+linter-settings:
   errcheck:
     check-type-assertions: true
     check-blank: false
@@ -37,7 +37,7 @@ linters-settings:
     locale: US
 
 issues:
-  exclude-rules:
+  exclude:
     # Exclude some linters from running on tests files
     - path: _test\.go
       linters:
@@ -63,4 +63,4 @@ issues:
   max-same-issues: 10
 
 severity:
-  default-severity: error
+  default: error
