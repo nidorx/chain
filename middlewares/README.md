@@ -64,7 +64,6 @@ router.Use(cors.New(cors.Config{
 }))
 ```
 
----
 
 ### 2. Logger Middleware (`logger/`)
 
@@ -156,7 +155,6 @@ router.GET("/test", func(ctx *chain.Context) error {
 })
 ```
 
----
 
 ### 3. Recovery Middleware (`recovery/`)
 
@@ -218,7 +216,6 @@ router.Use(logger.New())
 router.Use(cors.Default())
 ```
 
----
 
 ### 4. Limiter Middleware (`limiter/`)
 
@@ -285,7 +282,6 @@ router.POST("/upload", func(ctx *chain.Context) error {
 })
 ```
 
----
 
 ### 5. Session Middleware (`session/`)
 
@@ -335,7 +331,53 @@ router.GET("/login", func(ctx *chain.Context) error {
 
 **See:** [Session Middleware Documentation](session/README.md)
 
----
+
+### 6. Timeout Middleware (`timeout/`)
+
+Request timeout enforcement with proper context cancellation.
+
+**Features:**
+- Context-based cancellation using Go's standard `context.WithTimeout`
+- Database transactions roll back automatically
+- HTTP client requests cancelled on timeout
+- Configurable timeout duration
+- Custom error handlers
+- Path-scoped timeouts
+
+**Installation:**
+```go
+import "github.com/nidorx/chain/middlewares/timeout"
+```
+
+**Basic Usage:**
+```go
+// Global 30-second timeout
+router.Use(timeout.New(timeout.Config{
+    Timeout: 30 * time.Second,
+}))
+
+// Path-scoped timeout
+router.Use("/api/*", timeout.New(timeout.Config{
+    Timeout: 10 * time.Second,
+}))
+```
+
+**Handler Cooperation:**
+Handlers should respect context cancellation for proper timeout enforcement:
+
+```go
+router.GET("/db", func(ctx *chain.Context) error {
+    // Database driver will respect context cancellation
+    rows, err := db.QueryContext(ctx.Request.Context(), "SELECT ...")
+    if err != nil {
+        return err // Will be context.Canceled if timeout
+    }
+    return nil
+})
+```
+
+**See:** [Timeout Middleware Documentation](timeout/README.md)
+
 
 ## Middleware Registration
 
@@ -360,7 +402,6 @@ api := router.Group("/api")
 api.Use(middleware)
 ```
 
----
 
 ## Middleware Order
 
@@ -388,7 +429,6 @@ router.Use(sessionManager)
 router.GET("/test", handler)
 ```
 
----
 
 ## Writing Custom Middleware
 
@@ -417,7 +457,6 @@ func MyMiddleware() chain.MiddlewareFunc {
 router.Use(MyMiddleware())
 ```
 
----
 
 ## Testing
 
@@ -433,9 +472,9 @@ go test ./middlewares/logger/...
 go test ./middlewares/recovery/...
 go test ./middlewares/limiter/...
 go test ./middlewares/session/...
+go test ./middlewares/timeout/...
 ```
 
----
 
 ## References
 

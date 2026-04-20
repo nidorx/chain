@@ -45,17 +45,18 @@ func (r *Route) Dispatch(ctx *Context) error {
 	}
 
 	index := 0
+	currentCtx := ctx // track the current context through the middleware chain
 	var next func() error
 	next = func() error {
 		if index > len(r.Middlewares)-1 {
 			// end of middlewares
-			return r.Handle(ctx)
+			return r.Handle(currentCtx)
 		}
 
 		middleware := r.Middlewares[index]
 		index++
 
-		match, names, values := middleware.Path.Match(ctx)
+		match, names, values := middleware.Path.Match(currentCtx)
 		if match {
 			var nextErr error
 			calledNext := false
@@ -64,7 +65,7 @@ func (r *Route) Dispatch(ctx *Context) error {
 					slog.Warn(
 						"[chain] calling next() multiple times for route",
 						slog.Int("index", index),
-						slog.String("path", ctx.path),
+						slog.String("path", currentCtx.path),
 					)
 
 					return nextErr
@@ -76,10 +77,11 @@ func (r *Route) Dispatch(ctx *Context) error {
 
 			if len(names) > 0 {
 				// middleware expects parameterizable route
-				return middleware.Handle(ctx.WithParams(names, values), nextMid)
+				currentCtx = currentCtx.WithParams(names, values)
+				return middleware.Handle(currentCtx, nextMid)
 			} else {
 				// use same context
-				return middleware.Handle(ctx, nextMid)
+				return middleware.Handle(currentCtx, nextMid)
 			}
 		}
 		return next()

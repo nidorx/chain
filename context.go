@@ -3,6 +3,7 @@ package chain
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 type chainContextKey struct{}
@@ -165,6 +166,34 @@ func (ctx *Context) BeforeSend(callback func()) error {
 func (ctx *Context) AfterSend(callback func()) error {
 	if spy, is := ctx.Writer.(*ResponseWriterSpy); is {
 		return spy.afterWrite(callback)
+	}
+	return nil
+}
+
+// Deadline returns the time when work done on behalf of this context
+// should be canceled. Deadline returns ok==false when no deadline is set.
+func (ctx *Context) Deadline() (deadline time.Time, ok bool) {
+	if ctx.Request != nil {
+		return ctx.Request.Context().Deadline()
+	}
+	return time.Time{}, false
+}
+
+// Done returns a channel that's closed when work done on behalf of this
+// context should be canceled. Done may return nil if this context can
+// never be canceled.
+func (ctx *Context) Done() <-chan struct{} {
+	if ctx.Request != nil {
+		return ctx.Request.Context().Done()
+	}
+	return nil
+}
+
+// Err returns an error if the context has been canceled or timed out.
+// Err returns nil if the context is not done.
+func (ctx *Context) Err() error {
+	if ctx.Request != nil {
+		return ctx.Request.Context().Err()
 	}
 	return nil
 }

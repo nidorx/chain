@@ -396,6 +396,52 @@ Request → MW₁ → MW₂ → ... → MWₙ → Handler → MWₙ → ... → 
 
 If any middleware returns without calling `next()`, the chain short-circuits and the handler is never executed.
 
+### Shipped Middlewares
+
+Chain includes several production-ready middlewares:
+
+| Middleware | Package | Description |
+|-----------|---------|-------------|
+| CORS | `middlewares/cors` | Full-featured CORS with wildcard, regex, and context-aware origin validation |
+| Logger | `middlewares/logger` | Structured request logging with `log/slog` |
+| Recovery | `middlewares/recovery` | Panic recovery with stack traces |
+| Limiter | `middlewares/limiter` | Request body size limiting |
+| Session | `middlewares/session` | Cookie-based encrypted sessions |
+| Timeout | `middlewares/timeout` | Request timeout enforcement with context cancellation |
+
+
+### Graceful Shutdown
+
+The `chain.Server` type provides production-ready server lifecycle management:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    chain.Server                      │
+│  ┌──────────────┐  ┌──────────────────────────────┐  │
+│  │ http.Server  │  │ ShutdownConfig               │  │
+│  │ (Addr,       │  │ - Timeout (default 30s)      │  │
+│  │  Handler)    │  │ - Signals (SIGINT, SIGTERM)  │  │
+│  └──────┬───────┘  └──────────────────────────────┘  │
+│         │                                            │
+│  ┌──────┴───────┐  ┌──────────────────────────────┐  │
+│  │ Lifecycle    │  │ State                        │  │
+│  │ Hooks        │  │ - shutting (atomic)          │  │
+│  │ - OnShutdown │  │ - stopChan                   │  │
+│  │ - OnStop     │  └──────────────────────────────┘  │
+│  └──────────────┘                                    │
+└─────────────────────────────────────────────────────┘
+```
+
+The shutdown sequence:
+
+1. **Signal reception** — `waitForShutdownSignal()` blocks on `os.Signal` channel (default: `SIGINT`, `SIGTERM`)
+2. **`OnShutdown` hook** — Invoked immediately, before any waiting
+3. **`http.Server.Shutdown(ctx)`** — Stops accepting new connections, waits for in-flight requests with context timeout
+4. **`OnStop` hook** — Invoked after all requests complete or timeout
+5. **`stopChan` closed** — Unblocks any goroutines waiting on `server.Wait()`
+
+The `GracefulMiddleware` integrates with this lifecycle by checking `server.IsShuttingDown()` on each request and setting `Connection: close` to drain keep-alive connections.
+
 
 ## Design Decisions
 

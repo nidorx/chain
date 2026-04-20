@@ -244,6 +244,10 @@ func (r *Router) Use(args ...any) (Group, error) {
 
 	for i := range args {
 		switch arg := args[i].(type) {
+		case MiddlewareFunc:
+			middlewares = append(middlewares, func(ctx *Context, next func() error) error {
+				return arg(ctx, next)
+			})
 		case string:
 			if path == "" {
 				path = arg

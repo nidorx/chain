@@ -16,6 +16,8 @@
 7. [Route Groups](#route-groups)
 8. [Cryptography](#cryptography)
 9. [Utilities](#utilities)
+10. [Request Timeouts](#request-timeouts)
+11. [Graceful Shutdown](#graceful-shutdown)
 
 ---
 
@@ -489,24 +491,6 @@ router.Use("/api/*", func(ctx *chain.Context, next func() error) error {
 })
 ```
 
-#### CORS Middleware
-
-```go
-router.Use(func(ctx *chain.Context, next func() error) error {
-    ctx.SetHeader("Access-Control-Allow-Origin", "*")
-    ctx.SetHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE")
-    ctx.SetHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
-    
-    if ctx.Method() == "OPTIONS" {
-        ctx.OK()
-        return nil
-    }
-    
-    return next()
-})
-```
-
----
 
 ## Route Groups
 
@@ -665,6 +649,238 @@ type Serializer interface {
 jsonSerializer := &chain.JsonSerializer{}
 data, _ := jsonSerializer.Encode(object)
 object, _ = jsonSerializer.Decode(data, &object)
+```
+
+---
+
+## Request Timeouts
+
+Chain provides request timeout enforcement at both global and per-route levels. When a timeout expires, the handler's response writing is blocked and a `503 Service Unavailable` is returned.
+
+### Timeout Middleware (Global)
+
+Applies a timeout to all routes:
+
+```go
+import "github.com/nidorx/chain"
+
+// 30-second timeout for all requests
+router.Use(chain.TimeoutMiddleware(30 * time.Second))
+```
+
+### WithTimeout (Per-Route)
+
+Applies a timeout to a specific handler:
+
+```go
+router.GET("/slow", chain.WithTimeout(10*time.Second, func(ctx *chain.Context) error {
+    // This handler has 10 seconds to complete
+    result := doSlowOperation()
+    ctx.Json(result)
+    return nil
+}))
+```
+
+### WithTimeoutMiddleware (Path-Scoped)
+
+Applies a timeout to a path pattern:
+
+```go
+// 15-second timeout for all /api/* routes
+router.Use("/api/*", chain.WithTimeoutMiddleware(15*time.Second))
+
+// 5-second timeout for health checks
+router.Use("/health", chain.WithTimeoutMiddleware(5*time.Second))
+```
+
+### Behavior
+
+| Scenario | Result |
+|----------|--------|
+| Handler completes before timeout | Normal response |
+| Handler exceeds timeout | `503 Service Unavailable`, handler blocked from writing |
+| Handler already wrote response before timeout | Response sent as-is |
+| Zero or negative timeout | No timeout enforced (passthrough) |
+
+### Error Value
+
+When a timeout occurs, the middleware returns `chain.ErrRequestTimeout`:
+
+```go
+router.ErrorHandler = func(ctx *chain.Context, err error) {
+    if errors.Is(err, chain.ErrRequestTimeout) {
+        log.Printf("Request timed out: %s %s", ctx.Method(), ctx.Request.URL.Path)
+    }
+}
+```
+
+### Timeout Configuration
+
+| Type | Description |
+|------|-------------|
+| `TimeoutMiddleware(duration)` | Global middleware, applies to all routes |
+| `WithTimeout(duration, handler)` | Wraps a single handler with timeout |
+| `WithTimeoutMiddleware(duration)` | MiddlewareHandler for path-scoped timeouts |
+
+---
+
+## Graceful Shutdown
+
+Chain provides a `Server` type that wraps `http.Server` with built-in graceful shutdown support, handling OS signals and draining in-flight requests.
+
+### Basic Usage
+
+```go
+import "github.com/nidorx/chain"
+
+func main() {
+    r := chain.New()
+    r.GET("/", func(ctx *chain.Context) error {
+        ctx.OK()
+        return nil
+    })
+
+    server := chain.NewServer(r, ":8080")
+    if err := server.ListenAndServe(); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### Server Creation
+
+```go
+// Simple creation
+server := chain.NewServer(router, ":8080")
+
+// With custom configuration
+server := chain.NewServerWithConfig(router, ":8080", chain.ShutdownConfig{
+    Timeout: 60 * time.Second,
+    Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP},
+})
+```
+
+### Shutdown Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `Timeout` | `time.Duration` | `30s` | Max duration to wait for in-flight requests |
+| `Signals` | `[]os.Signal` | `SIGINT, SIGTERM` | OS signals that trigger shutdown |
+
+### Lifecycle Hooks
+
+```go
+server := chain.NewServer(router, ":8080")
+
+// Called when shutdown begins (before waiting for in-flight requests)
+server.OnShutdown(func() {
+    log.Println("Shutdown initiated, stopping new connections...")
+})
+
+// Called after all in-flight requests complete or timeout reached
+server.OnStop(func() {
+    log.Println("Server stopped cleanly")
+})
+```
+
+### Programmatic Shutdown
+
+```go
+// Shutdown from application code
+server := chain.NewServer(router, ":8080")
+
+// Start server in background
+go func() {
+    if err := server.ListenAndServe(); err != nil {
+        log.Printf("Server error: %v", err)
+    }
+}()
+
+// Later: trigger shutdown
+time.AfterFunc(1*time.Hour, func() {
+    server.Stop() // or server.Shutdown(context.Background())
+})
+```
+
+### Shutdown Methods
+
+| Method | Description |
+|--------|-------------|
+| `ListenAndServe()` | Start server with signal-based graceful shutdown |
+| `ListenAndServeTLS(cert, key)` | Start TLS server with signal-based graceful shutdown |
+| `Shutdown(ctx)` | Initiate shutdown with custom context for timeout |
+| `Stop()` | Convenience for `Shutdown(nil)` (uses configured timeout) |
+| `IsShuttingDown()` | Returns true if shutdown is in progress |
+| `Wait()` | Blocks until server has fully shut down |
+| `OnShutdown(fn)` | Register callback at shutdown start |
+| `OnStop(fn)` | Register callback at shutdown completion |
+
+### Graceful Middleware
+
+During shutdown, you may want to signal clients that connections will close:
+
+```go
+server := chain.NewServer(router, ":8080")
+
+// Add middleware that sets Connection: close during shutdown
+router.Use(chain.GracefulMiddleware(server))
+```
+
+This sets the `Connection: close` header on all responses while the server is shutting down, preventing keep-alive connections from persisting.
+
+### Shutdown Sequence
+
+```
+1. OS signal received (SIGINT/SIGTERM)
+   └─2. OnShutdown() callback invoked
+       └─3. http.Server.Shutdown() called
+           ├─4. Stop accepting new connections
+           ├─5. Wait for in-flight requests (up to Timeout)
+           └─6. OnStop() callback invoked
+               └─7. Wait() channel closed
+```
+
+### Complete Example
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    "os/signal"
+    "time"
+
+    "github.com/nidorx/chain"
+)
+
+func main() {
+    r := chain.New()
+    r.GET("/", func(ctx *chain.Context) error {
+        ctx.Json(map[string]string{"status": "ok"})
+        return nil
+    })
+
+    server := chain.NewServerWithConfig(r, ":8080", chain.ShutdownConfig{
+        Timeout: 30 * time.Second,
+    })
+
+    server.OnShutdown(func() {
+        log.Println("Shutting down server...")
+    })
+    server.OnStop(func() {
+        log.Println("Server stopped")
+    })
+
+    // Graceful middleware - sets Connection: close during shutdown
+    r.Use(chain.GracefulMiddleware(server))
+
+    if err := server.ListenAndServe(); err != nil {
+        log.Printf("Server error: %v", err)
+        os.Exit(1)
+    }
+}
 ```
 
 ---

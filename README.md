@@ -24,6 +24,8 @@
 - **Pub/Sub System** — Cluster-aware publish/subscribe with optional encryption and compression
 - **Socket & Channels** — Real-time multiplexed communication over Server-Sent Events (SSE)
 - **Session Management** — Cookie-based sessions with optional encryption and signing
+- **Request Timeouts** — Per-route and global timeout enforcement with 503 response on deadline exceeded
+- **Graceful Shutdown** — Production-ready server lifecycle with SIGINT/SIGTERM handling, in-flight request draining, and lifecycle hooks
 
 ## Installation
 
@@ -475,6 +477,62 @@ ctx.ServeContent(data, name, modTime) // Serve with Range support
 ctx.BeforeSend(func() { /* modify headers before send */ })
 ctx.AfterSend(func() { /* cleanup, metrics */ })
 ```
+
+### Request Timeouts
+
+Chain provides request timeout enforcement with proper context cancellation via the `middlewares/timeout` package:
+
+```go
+import "github.com/nidorx/chain/middlewares/timeout"
+
+// Global timeout (all routes)
+r.Use(timeout.New(timeout.Config{
+    Timeout: 30 * time.Second,
+}))
+
+// Path-scoped timeout
+r.Use("/api/*", timeout.New(timeout.Config{
+    Timeout: 15 * time.Second,
+}))
+```
+
+When a timeout occurs:
+1. The request context is cancelled
+2. All context-aware operations stops (database queries, HTTP clients, etc.)
+3. A `503 Service Unavailable` is returned (if response not yet written)
+
+Handlers should respect context cancellation for proper timeout enforcement:
+
+```go
+r.GET("/db", func(ctx *chain.Context) error {
+    // Database driver will respect context cancellation
+    rows, err := db.QueryContext(ctx.Request.Context(), "SELECT ...")
+    if err != nil {
+        return err // context.Canceled on timeout
+    }
+    return nil
+})
+```
+
+See [Timeout Middleware Documentation](middlewares/timeout/README.md) for details.
+
+### Graceful Shutdown
+
+Chain provides production-ready graceful shutdown:
+
+```go
+server := chain.NewServer(r, ":8080")
+
+// Optional: lifecycle hooks
+server.OnShutdown(func() { log.Println("Shutting down...") })
+server.OnStop(func() { log.Println("All requests completed") })
+
+if err := server.ListenAndServe(); err != nil {
+    log.Fatal(err)
+}
+```
+
+Handles `SIGINT`/`SIGTERM`, stops accepting connections, waits for in-flight requests (default 30s).
 
 ## Data Binding
 
