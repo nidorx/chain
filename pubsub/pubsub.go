@@ -117,7 +117,6 @@ func getDirectTopic() string {
 
 func Subscribe(topicPattern string, dispatcher Dispatcher) {
 	p.subscriptionsMutex.Lock()
-	defer p.subscriptionsMutex.Unlock()
 	var sub *subscription
 
 	if sub = p.subscriptions.Get(topicPattern); sub == nil {
@@ -128,15 +127,37 @@ func Subscribe(topicPattern string, dispatcher Dispatcher) {
 				slog.String("topic", topicPattern),
 				slog.Any("error", err),
 			)
+			p.subscriptionsMutex.Unlock()
 			return
 		}
-		go trySubscribe(topicPattern)
 	}
 
 	if _, exist := sub.dispatchers[dispatcher]; !exist {
 		sub.dispatchers[dispatcher] = 0
 	}
 	sub.dispatchers[dispatcher] = sub.dispatchers[dispatcher] + 1
+	count := sub.dispatchers[dispatcher]
+
+	// Cancel any pending unsubscribe synchronously while holding lock
+	p.unsubscribeMutex.Lock()
+	if timer, exist := p.unsubscribeTimers[topicPattern]; exist {
+		delete(p.unsubscribeTimers, topicPattern)
+		timer.Stop()
+	}
+	p.unsubscribeMutex.Unlock()
+
+	p.subscriptionsMutex.Unlock()
+
+	slog.Debug(
+		"[chain.pubsub] subscribe",
+		slog.String("topic", topicPattern),
+		slog.Int("dispatchers", count),
+	)
+
+	// Now safe to subscribe adapter (outside lock to avoid deadlock)
+	if config := GetAdapter(topicPattern); config != nil {
+		config.Adapter.Subscribe(topicPattern)
+	}
 }
 
 // Unsubscribe the dispatchFunc from the pubsub adapter's topic.
@@ -154,9 +175,32 @@ func Unsubscribe(topicPattern string, dispatcher Dispatcher) {
 		return
 	}
 	sub.dispatchers[dispatcher] = sub.dispatchers[dispatcher] - 1
-	if sub.dispatchers[dispatcher] < 1 {
+	count := sub.dispatchers[dispatcher]
+
+	if count < 1 {
 		delete(sub.dispatchers, dispatcher)
+
+		// Cancel any pending unsubscribe timer first (re-subscribe case)
+		p.unsubscribeMutex.Lock()
+		if timer, exists := p.unsubscribeTimers[topicPattern]; exists {
+			delete(p.unsubscribeTimers, topicPattern)
+			timer.Stop()
+		}
+		p.unsubscribeMutex.Unlock()
+
+		slog.Debug(
+			"[chain.pubsub] unsubscribe (last dispatcher removed, scheduling adapter unsubscribe)",
+			slog.String("topic", topicPattern),
+		)
+
+		// Schedule adapter unsubscribe after grace period
 		go scheduleUnsubscribe(topicPattern)
+	} else {
+		slog.Debug(
+			"[chain.pubsub] unsubscribe",
+			slog.String("topic", topicPattern),
+			slog.Int("remaining_dispatchers", count),
+		)
 	}
 }
 
@@ -190,7 +234,9 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 		var compressed []byte
 		if compressed, err = compressPayload(msgToSend); err != nil {
 			slog.Warn(
-				"[chain.pubsub] failed to compress payload",
+				"[chain.pubsub] compression failed",
+				slog.String("topic", topic),
+				slog.Int("original_size", len(msgToSend)),
 				slog.Any("error", err),
 			)
 		} else if len(compressed) < len(msgToSend) {
@@ -207,6 +253,12 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 		}
 		var encrypted []byte
 		if encrypted, err = encryptPayload(keyring, msgToSend); err != nil {
+			slog.Error(
+				"[chain.pubsub] encryption failed",
+				slog.String("topic", topic),
+				slog.Int("original_size", len(msgToSend)),
+				slog.Any("error", err),
+			)
 			return errors.Join(errors.New("encryption of message failed"), err)
 		}
 		msgToSend = encrypted
@@ -215,10 +267,17 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 	// Always dispatch locally first (local-first design)
 	dispatchMessage(topic, message, getSelfIDString())
 
+	slog.Debug(
+		"[chain.pubsub] broadcast",
+		slog.String("topic", topic),
+		slog.Int("message_size", len(msgToSend)),
+	)
+
 	if err = config.Adapter.Broadcast(topic, msgToSend, opts); err != nil {
 		slog.Error(
 			"[chain.pubsub] adapter broadcast failed",
 			slog.String("topic", topic),
+			slog.Int("message_size", len(msgToSend)),
 			slog.Any("error", err),
 		)
 	}
@@ -281,7 +340,9 @@ func broadcastMessage(msgType MessageType, topic string, message []byte, options
 		var compressed []byte
 		if compressed, err = compressPayload(msgToSend); err != nil {
 			slog.Warn(
-				"[chain.pubsub] failed to compress payload",
+				"[chain.pubsub] compression failed",
+				slog.String("topic", topic),
+				slog.Int("original_size", len(msgToSend)),
 				slog.Any("error", err),
 			)
 		} else if len(compressed) < len(msgToSend) {
@@ -337,8 +398,8 @@ func Dispatch(topic string, message []byte) {
 			if config.DisableEncryption {
 				slog.Error(
 					"[chain.pubsub] remote message is encrypted and encryption is not configured",
-					slog.String("Topic", topic),
-					slog.String("Adapter", config.Adapter.Name()),
+					slog.String("topic", topic),
+					slog.String("adapter", config.Adapter.Name()),
 				)
 				return
 			}
@@ -351,9 +412,9 @@ func Dispatch(topic string, message []byte) {
 			if err != nil {
 				slog.Error(
 					"[chain.pubsub] could not decrypt remote message",
-					slog.Any("Error", err),
-					slog.String("Topic", topic),
-					slog.String("Adapter", config.Adapter.Name()),
+					slog.String("topic", topic),
+					slog.String("adapter", config.Adapter.Name()),
+					slog.Any("error", err),
 				)
 				return
 			}
@@ -364,8 +425,8 @@ func Dispatch(topic string, message []byte) {
 		} else if !config.DisableEncryption {
 			slog.Error(
 				"[chain.pubsub] encryption is configured but remote message is not encrypted",
-				slog.String("Topic", topic),
-				slog.String("Adapter", config.Adapter.Name()),
+				slog.String("topic", topic),
+				slog.String("adapter", config.Adapter.Name()),
 			)
 			return
 		}
@@ -376,9 +437,9 @@ func Dispatch(topic string, message []byte) {
 			if err != nil {
 				slog.Error(
 					"[chain.pubsub] could not decompress remote message",
-					slog.Any("Error", err),
-					slog.String("Topic", topic),
-					slog.String("Adapter", config.Adapter.Name()),
+					slog.String("topic", topic),
+					slog.String("adapter", config.Adapter.Name()),
+					slog.Any("error", err),
 				)
 				return
 			}
@@ -395,8 +456,9 @@ func Dispatch(topic string, message []byte) {
 		if len(message) < 20 {
 			slog.Error(
 				"[chain.pubsub] invalid remote message length",
-				slog.String("Topic", topic),
-				slog.String("Adapter", config.Adapter.Name()),
+				slog.String("topic", topic),
+				slog.String("adapter", config.Adapter.Name()),
+				slog.Int("message_len", len(message)),
 			)
 			return
 		}
@@ -406,9 +468,9 @@ func Dispatch(topic string, message []byte) {
 		if err != nil {
 			slog.Error(
 				"[chain.pubsub] invalid remote message from",
-				slog.Any("Error", err),
-				slog.String("Topic", topic),
-				slog.String("Adapter", config.Adapter.Name()),
+				slog.String("topic", topic),
+				slog.String("adapter", config.Adapter.Name()),
+				slog.Any("error", err),
 			)
 			return
 		}
@@ -423,9 +485,9 @@ func Dispatch(topic string, message []byte) {
 			if topic != getDirectTopic() {
 				slog.Error(
 					"[chain.pubsub] invalid topic for remote direct broadcast message",
-					slog.String("Topic", topic),
-					slog.String("Adapter", config.Adapter.Name()),
-					slog.String("Expected", getDirectTopic()),
+					slog.String("topic", topic),
+					slog.String("adapter", config.Adapter.Name()),
+					slog.String("expected", getDirectTopic()),
 				)
 				return
 			}
@@ -434,8 +496,9 @@ func Dispatch(topic string, message []byte) {
 			if len(message) < 25 {
 				slog.Error(
 					"[chain.pubsub] invalid remote direct broadcast length",
-					slog.String("Topic", topic),
-					slog.String("Adapter", config.Adapter.Name()),
+					slog.String("topic", topic),
+					slog.String("adapter", config.Adapter.Name()),
+					slog.Int("message_len", len(message)),
 				)
 				return
 			}
@@ -446,7 +509,7 @@ func Dispatch(topic string, message []byte) {
 			if !bytes.Equal(getSelfIDBytes(), toBytes) {
 				slog.Error(
 					"[chain.pubsub] invalid remote direct broadcast destination",
-					slog.String("Adapter", config.Adapter.Name()),
+					slog.String("adapter", config.Adapter.Name()),
 				)
 				return
 			}
@@ -458,7 +521,9 @@ func Dispatch(topic string, message []byte) {
 			if len(message) < topicNameLen {
 				slog.Error(
 					"[chain.pubsub] invalid remote direct broadcast length",
-					slog.String("Adapter", config.Adapter.Name()),
+					slog.String("adapter", config.Adapter.Name()),
+					slog.Int("message_len", len(message)),
+					slog.Int("expected_topic_len", topicNameLen),
 				)
 				return
 			}
@@ -467,8 +532,9 @@ func Dispatch(topic string, message []byte) {
 		} else if msgType != MessageTypeBroadcast {
 			slog.Error(
 				"[chain.pubsub] invalid remote message type",
-				slog.String("Topic", topic),
-				slog.String("Adapter", config.Adapter.Name()),
+				slog.String("topic", topic),
+				slog.String("adapter", config.Adapter.Name()),
+				slog.Uint64("message_type", uint64(msgType)),
 			)
 			return
 		}
@@ -523,13 +589,6 @@ func GetAdapter(topic string) *AdapterConfig {
 
 // trySubscribe subscribe the adapter on the given topic
 func trySubscribe(topic string) {
-	p.unsubscribeMutex.Lock()
-	defer p.unsubscribeMutex.Unlock()
-	if timer, exist := p.unsubscribeTimers[topic]; exist {
-		delete(p.unsubscribeTimers, topic)
-		defer timer.Stop()
-	}
-
 	if config := GetAdapter(topic); config != nil {
 		config.Adapter.Subscribe(topic)
 	}
