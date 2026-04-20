@@ -64,8 +64,8 @@ var p = &pubsub{
 	unsubscribeTimers: map[string]*time.Timer{},
 }
 
-// ResetPubsub resets the pubsub state for testing purposes.
-func ResetPubsub() {
+// Reset resets the pubsub state for testing purposes.
+func Reset() {
 	p.subscriptionsMutex.Lock()
 	p.subscriptions = &pkg.WildcardStore[*subscription]{}
 	p.subscriptionsMutex.Unlock()
