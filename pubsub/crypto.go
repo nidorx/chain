@@ -2,12 +2,25 @@ package pubsub
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 
 	"github.com/nidorx/chain"
 	"github.com/nidorx/chain/crypto"
 )
 
-var globalKeyring = chain.NewKeyring("chain.pubsub.keyring.salt", 1000, 32, "sha256")
+var globalKeyring = func() *crypto.Keyring {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		panic(err)
+	}
+	return chain.NewKeyring(
+		hex.EncodeToString(salt),
+		216000,
+		32,
+		"sha256",
+	)
+}()
 
 var aad = append([]byte{byte(MessageTypeEncrypt)}, []byte("chain.pubsub.aad")...)
 

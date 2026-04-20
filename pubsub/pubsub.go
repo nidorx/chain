@@ -20,6 +20,10 @@ var (
 	directTopic  = "direct:" + selfIdString
 	selfIdMutex  sync.RWMutex
 	ErrNoAdapter = errors.New("no adapter matches topic to broadcast the message")
+
+	// MaxMessageSize limits message size to prevent memory exhaustion.
+	// Default: 1MB
+	MaxMessageSize = 1 << 20
 )
 
 type Dispatcher interface {
@@ -208,9 +212,15 @@ func Broadcast(topic string, message []byte, options ...*Option) (err error) {
 		msgToSend = encrypted
 	}
 
-	if err = config.Adapter.Broadcast(topic, msgToSend, opts); err == nil {
-		// local dispatch
-		dispatchMessage(topic, message, selfIdString)
+	// Always dispatch locally first (local-first design)
+	dispatchMessage(topic, message, getSelfIDString())
+
+	if err = config.Adapter.Broadcast(topic, msgToSend, opts); err != nil {
+		slog.Error(
+			"[chain.pubsub] adapter broadcast failed",
+			slog.String("topic", topic),
+			slog.Any("error", err),
+		)
 	}
 	return
 }
@@ -300,6 +310,24 @@ func broadcastMessage(msgType MessageType, topic string, message []byte, options
 // Dispatch used by adapters, process and delivery messages coming from backend (redis, kafka, *MQ), decrypting and
 // decompressing if necessary.
 func Dispatch(topic string, message []byte) {
+	if len(message) == 0 {
+		slog.Warn(
+			"[chain.pubsub] received empty message",
+			slog.String("topic", topic),
+		)
+		return
+	}
+
+	if len(message) > MaxMessageSize {
+		slog.Warn(
+			"[chain.pubsub] message exceeds maximum size",
+			slog.String("topic", topic),
+			slog.Int("size", len(message)),
+			slog.Int("max", MaxMessageSize),
+		)
+		return
+	}
+
 	if config := GetAdapter(topic); config != nil {
 		// Read the message type
 		msgType := MessageType(message[0])
