@@ -14,7 +14,7 @@ import (
 )
 
 // ============================================================================
-// Benchmark Suite - Phase 2.2: Performance Baseline
+// Benchmark Suite
 // ============================================================================
 // This file contains comprehensive benchmarks for the Chain framework,
 // covering all critical performance paths as specified in the evolution roadmap.

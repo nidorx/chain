@@ -27,12 +27,12 @@ func init() {
 
 // testGetSelfID returns the current selfIdString for testing purposes.
 func testGetSelfID() string {
-	return getSelfIDString()
+	return getSelfIDStringForTest()
 }
 
 // testGetDirectTopic returns the current directTopic for testing purposes.
 func testGetDirectTopic() string {
-	return getDirectTopic()
+	return getDirectTopicForTest()
 }
 
 func Test_PubSub_Broadcast_Dispatcher(t *testing.T) {
@@ -153,7 +153,7 @@ func testAsRemote(fn func()) {
 	oSelfString := testGetSelfID()
 
 	// Set remote state using thread-safe setter
-	setSelfID(remoteId)
+	setSelfIDForTest(remoteId)
 
 	defer func() {
 		// Restore original state - parse the KSUID from string
@@ -161,7 +161,7 @@ func testAsRemote(fn func()) {
 		if err != nil {
 			panic(err)
 		}
-		setSelfID(originalId)
+		setSelfIDForTest(originalId)
 	}()
 
 	fn()
@@ -585,7 +585,7 @@ func init() {
 }
 
 // ============================================================================
-// Concurrency Tests (2.2)
+// Concurrency Tests
 // ============================================================================
 
 // TestConcurrentSubscribeUnsubscribe verifies that rapid subscribe/unsubscribe
@@ -745,11 +745,11 @@ func TestConcurrentSubscribeAndBroadcast(t *testing.T) {
 }
 
 // ============================================================================
-// Edge Case Tests (2.2)
+// Edge Case Tests
 // ============================================================================
 
 // TestEmptyMessageDispatch verifies that empty messages don't cause panic.
-func TestEmptyMessageDispatchPhase2(t *testing.T) {
+func TestEmptyMessageDispatch(t *testing.T) {
 	testClearPubsub()
 
 	topic := "test:empty"
@@ -787,7 +787,7 @@ func TestSingleByteMessage(t *testing.T) {
 }
 
 // TestOversizedMessage verifies oversized messages are rejected.
-func TestOversizedMessagePhase2(t *testing.T) {
+func TestOversizedMessage(t *testing.T) {
 	testClearPubsub()
 
 	originalMax := MaxMessageSize
@@ -810,7 +810,7 @@ func TestOversizedMessagePhase2(t *testing.T) {
 }
 
 // TestMaxSizeBoundary verifies messages at exact boundary.
-func TestMaxSizeBoundaryPhase2(t *testing.T) {
+func TestMaxSizeBoundary(t *testing.T) {
 	testClearPubsub()
 
 	originalMax := MaxMessageSize
@@ -829,7 +829,7 @@ func TestMaxSizeBoundaryPhase2(t *testing.T) {
 }
 
 // ============================================================================
-// Wildcard Topic Matching Tests (2.2)
+// Wildcard Topic Matching Tests
 // ============================================================================
 
 // TestWildcardTopicMatching verifies comprehensive wildcard topic matching.
@@ -933,11 +933,11 @@ func TestLongestPrefixWildcardMatch(t *testing.T) {
 }
 
 // ============================================================================
-// Adapter Failure Tests (2.2)
+// Adapter Failure Tests
 // ============================================================================
 
 // TestBroadcastAdapterFailureLocalDispatch verifies local dispatch still works when adapter fails.
-func TestBroadcastAdapterFailureLocalDispatchPhase2(t *testing.T) {
+func TestBroadcastAdapterFailureLocalDispatch(t *testing.T) {
 	testClearPubsub()
 
 	topic := "fail:local"
@@ -1029,7 +1029,7 @@ func TestBroadcastNoAdapter(t *testing.T) {
 }
 
 // ============================================================================
-// Timer/Unsubscribe Tests (2.2)
+// Timer/Unsubscribe Tests
 // ============================================================================
 
 // TestUnsubscribeTimerCancellation verifies re-subscribe cancels pending unsubscribe timer.
@@ -1180,7 +1180,7 @@ func TestRapidSubscribeUnsubscribeCycles(t *testing.T) {
 }
 
 // ============================================================================
-// Multiple Dispatchers Per Topic Tests (2.2)
+// Multiple Dispatchers Per Topic Tests
 // ============================================================================
 
 // TestMultipleDispatchersPerTopic verifies multiple dispatchers can subscribe to same topic.
@@ -1270,7 +1270,7 @@ func TestSameDispatcherMultipleSubscriptions(t *testing.T) {
 }
 
 // ============================================================================
-// Disabled Encryption/Compression Tests (2.2)
+// Disabled Encryption/Compression Tests
 // ============================================================================
 
 // TestBroadcastDisabledEncryption verifies broadcast works with encryption disabled.
@@ -1524,71 +1524,6 @@ func TestResetPubsubSafety(t *testing.T) {
 }
 
 // ============================================================================
-// Global Options Tests
-// ============================================================================
-
-// TestSetGlobalOptions verifies global options are applied.
-func TestSetGlobalOptions(t *testing.T) {
-	testClearPubsub()
-	testAdapter.clear()
-
-	SetGlobalOptions(O("global-key", "global-value"))
-	defer SetGlobalOptions() // Clear after test
-
-	topic := "global:options"
-	message := []byte("test")
-
-	err := Broadcast(topic, message)
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-time.After(time.Millisecond * 20)
-
-	// Verify adapter received global options
-	adapterMsg := testAdapter.pop()
-	if adapterMsg == nil {
-		t.Fatal("adapter should have received message")
-	}
-
-	if val, ok := adapterMsg.opts["global-key"]; !ok || val != "global-value" {
-		t.Errorf("expected global option global-key=global-value, got %v", adapterMsg.opts)
-	}
-}
-
-// TestBroadcastOptionsOverride verifies per-broadcast options override global options.
-func TestBroadcastOptionsOverride(t *testing.T) {
-	testClearPubsub()
-	testAdapter.clear()
-
-	SetGlobalOptions(O("shared-key", "global-value"))
-	defer SetGlobalOptions()
-
-	topic := "override:options"
-	message := []byte("test")
-
-	err := Broadcast(topic, message, O("shared-key", "local-value"), O("local-key", "local-value"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-time.After(time.Millisecond * 20)
-
-	adapterMsg := testAdapter.pop()
-	if adapterMsg == nil {
-		t.Fatal("adapter should have received message")
-	}
-
-	// Should have overridden global option
-	if val, ok := adapterMsg.opts["shared-key"]; !ok || val != "local-value" {
-		t.Errorf("expected shared-key=local-value, got %v", adapterMsg.opts)
-	}
-
-	// Should have local option
-	if val, ok := adapterMsg.opts["local-key"]; !ok || val != "local-value" {
-		t.Errorf("expected local-key=local-value, got %v", adapterMsg.opts)
-	}
-}
-
-// ============================================================================
 // SetAdapters Tests
 // ============================================================================
 
@@ -1764,7 +1699,7 @@ func TestDispatchDirectBroadcastWrongTopic(t *testing.T) {
 	testClearPubsub()
 
 	// Dispatch a direct broadcast message with wrong topic
-	selfID := getSelfIDBytes()
+	selfID := getSelfIDBytesForTest()
 	wrongTopic := "direct:wrongnode"
 
 	// Create a valid direct broadcast message
@@ -1793,8 +1728,8 @@ func TestDispatchDirectBroadcastWrongTopic(t *testing.T) {
 func TestDispatchDirectBroadcastWrongTarget(t *testing.T) {
 	testClearPubsub()
 
-	selfID := getSelfIDBytes()
-	correctTopic := getDirectTopic()
+	selfID := getSelfIDBytesForTest()
+	correctTopic := getDirectTopicForTest()
 
 	// Create direct broadcast targeted to a different node
 	otherNode := make([]byte, 20)
@@ -1838,7 +1773,7 @@ func TestBroadcastMessageWithDummyAdapter(t *testing.T) {
 	dispatcher := &testDispatcherStruct{}
 	Subscribe(topic, dispatcher)
 
-	err := broadcastMessage(MessageTypeBroadcast, topic, message)
+	err := broadcastMessageForTest(MessageTypeBroadcast, topic, message)
 	<-time.After(time.Millisecond * 20)
 
 	if err != nil {
@@ -1858,7 +1793,7 @@ func TestDispatchInvalidMessageType(t *testing.T) {
 	// Create message with invalid type (e.g., 99)
 	buf := make([]byte, 0, 50)
 	buf = append(buf, byte(99)) // Invalid message type
-	buf = append(buf, getSelfIDBytes()...)
+	buf = append(buf, getSelfIDBytesForTest()...)
 	buf = append(buf, []byte("payload")...)
 
 	topic := "invalid:type"

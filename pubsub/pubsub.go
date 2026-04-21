@@ -1,35 +1,21 @@
 package pubsub
 
 import (
-	"bytes"
-	"encoding/binary"
-	"errors"
-	"fmt"
-	"log/slog"
 	"sync"
-	"time"
 
-	"github.com/nidorx/chain/pkg"
 	"github.com/segmentio/ksuid"
 )
 
-var (
-	selfId       = ksuid.New()
-	selfIdBytes  = selfId.Bytes() // 20 bytes
-	selfIdString = selfId.String()
-	directTopic  = "direct:" + selfIdString
-	selfIdMutex  sync.RWMutex
-	ErrNoAdapter = errors.New("no adapter matches topic to broadcast the message")
+// ============================================================================
+// Core Types
+// ============================================================================
 
-	// MaxMessageSize limits message size to prevent memory exhaustion.
-	// Default: 1MB
-	MaxMessageSize = 1 << 20
-)
-
+// Dispatcher interface must be implemented to receive subscribed messages.
 type Dispatcher interface {
 	Dispatch(topic string, message []byte, from string)
 }
 
+// DispatcherFuncImpl wraps a function to implement the Dispatcher interface.
 type DispatcherFuncImpl struct {
 	Dispatcher func(topic string, message []byte, from string)
 }
@@ -41,59 +27,91 @@ func (d *DispatcherFuncImpl) Dispatch(topic string, message []byte, from string)
 	d.Dispatcher(topic, message, from)
 }
 
+// DispatcherFunc wraps a function as a Dispatcher.
 func DispatcherFunc(d func(topic string, message []byte, from string)) Dispatcher {
 	return &DispatcherFuncImpl{Dispatcher: d}
 }
 
-// subscription represents the subscriptions that this server has. See pubsub.Subscribe
+// ============================================================================
+// Legacy Global State and Backward Compatibility Layer
+// ============================================================================
+
+var (
+	// selfId is the global node identifier (kept for backward compatibility)
+	selfId       = ksuid.New()
+	selfIdBytes  = selfId.Bytes()
+	selfIdString = selfId.String()
+	directTopic  = "direct:" + selfIdString
+	selfIdMutex  sync.RWMutex
+
+	// p is the legacy global pubsub instance.
+	// It is initialized in init() to point to Default after Default is created.
+	p *PubSub
+)
+
+func init() {
+	// Make p point to Default so tests accessing p directly work correctly
+	p = Default
+}
+
+// subscription represents the subscriptions that this server has.
 type subscription struct {
 	dispatchers map[Dispatcher]int // incremental dispatcher subscriptions
 }
 
-// pubsub Realtime Publisher/Subscriber service.
-type pubsub struct {
-	adapters           *pkg.WildcardStore[*AdapterConfig]
-	subscriptions      *pkg.WildcardStore[*subscription]
-	unsubscribeTimers  map[string]*time.Timer
-	unsubscribeMutex   sync.Mutex
-	subscriptionsMutex sync.RWMutex
+// ErrNoAdapter is returned when no adapter matches the broadcast topic.
+var ErrNoAdapter = &pubsubError{"no adapter matches topic to broadcast the message"}
+
+// MaxMessageSize limits message size to prevent memory exhaustion.
+// Default: 1MB
+var MaxMessageSize = 1 << 20
+
+// pubsubError is a custom error type for pubsub operations.
+type pubsubError struct {
+	msg string
 }
 
-var p = &pubsub{
-	subscriptions:     &pkg.WildcardStore[*subscription]{},
-	unsubscribeTimers: map[string]*time.Timer{},
+func (e *pubsubError) Error() string {
+	return e.msg
 }
 
-// Reset resets the pubsub state for testing purposes.
-func Reset() {
-	p.subscriptionsMutex.Lock()
-	p.subscriptions = &pkg.WildcardStore[*subscription]{}
-	p.subscriptionsMutex.Unlock()
+// ============================================================================
+// Test Helper Functions (exposed for testing)
+// ============================================================================
 
-	p.unsubscribeMutex.Lock()
-	p.unsubscribeTimers = map[string]*time.Timer{}
-	p.unsubscribeMutex.Unlock()
-}
-
-// Self get node id
-func Self() string {
+// getSelfIDStringForTest returns selfIdString for testing purposes.
+func getSelfIDStringForTest() string {
 	selfIdMutex.RLock()
 	defer selfIdMutex.RUnlock()
 	return selfIdString
 }
 
-// setSelfID updates the self ID variables (primarily for testing).
-func setSelfID(id ksuid.KSUID) {
+// getDirectTopicForTest returns directTopic for testing purposes.
+func getDirectTopicForTest() string {
+	selfIdMutex.RLock()
+	defer selfIdMutex.RUnlock()
+	return directTopic
+}
+
+// setSelfIDForTest updates the self ID variables for testing.
+func setSelfIDForTest(id ksuid.KSUID) {
 	selfIdMutex.Lock()
 	defer selfIdMutex.Unlock()
 	selfId = id
 	selfIdBytes = id.Bytes()
 	selfIdString = id.String()
 	directTopic = "direct:" + selfIdString
+
+	// Also update Default instance for consistency
+	Default.selfIdMutex.Lock()
+	Default.selfId = id
+	Default.selfIdBytes = id.Bytes()
+	Default.selfIdString = id.String()
+	Default.selfIdMutex.Unlock()
 }
 
-// getSelfIDBytes returns a copy of selfIdBytes safely.
-func getSelfIDBytes() []byte {
+// getSelfIDBytesForTest returns a copy of selfIdBytes for testing.
+func getSelfIDBytesForTest() []byte {
 	selfIdMutex.RLock()
 	defer selfIdMutex.RUnlock()
 	b := make([]byte, len(selfIdBytes))
@@ -101,565 +119,7 @@ func getSelfIDBytes() []byte {
 	return b
 }
 
-// getSelfIDString returns selfIdString safely.
-func getSelfIDString() string {
-	selfIdMutex.RLock()
-	defer selfIdMutex.RUnlock()
-	return selfIdString
-}
-
-// getDirectTopic returns directTopic safely.
-func getDirectTopic() string {
-	selfIdMutex.RLock()
-	defer selfIdMutex.RUnlock()
-	return directTopic
-}
-
-func Subscribe(topicPattern string, dispatcher Dispatcher) {
-	p.subscriptionsMutex.Lock()
-	var sub *subscription
-
-	if sub = p.subscriptions.Get(topicPattern); sub == nil {
-		sub = &subscription{dispatchers: map[Dispatcher]int{}}
-		if err := p.subscriptions.Insert(topicPattern, sub); err != nil {
-			slog.Warn(
-				"[chain.pubsub] failed to subscribe",
-				slog.String("topic", topicPattern),
-				slog.Any("error", err),
-			)
-			p.subscriptionsMutex.Unlock()
-			return
-		}
-	}
-
-	if _, exist := sub.dispatchers[dispatcher]; !exist {
-		sub.dispatchers[dispatcher] = 0
-	}
-	sub.dispatchers[dispatcher] = sub.dispatchers[dispatcher] + 1
-	count := sub.dispatchers[dispatcher]
-
-	// Cancel any pending unsubscribe synchronously while holding lock
-	p.unsubscribeMutex.Lock()
-	if timer, exist := p.unsubscribeTimers[topicPattern]; exist {
-		delete(p.unsubscribeTimers, topicPattern)
-		timer.Stop()
-	}
-	p.unsubscribeMutex.Unlock()
-
-	p.subscriptionsMutex.Unlock()
-
-	slog.Debug(
-		"[chain.pubsub] subscribe",
-		slog.String("topic", topicPattern),
-		slog.Int("dispatchers", count),
-	)
-
-	// Now safe to subscribe adapter (outside lock to avoid deadlock)
-	if config := GetAdapter(topicPattern); config != nil {
-		config.Adapter.Subscribe(topicPattern)
-	}
-}
-
-// Unsubscribe the dispatchFunc from the pubsub adapter's topic.
-func Unsubscribe(topicPattern string, dispatcher Dispatcher) {
-	p.subscriptionsMutex.Lock()
-	defer p.subscriptionsMutex.Unlock()
-	var sub *subscription
-	var exist bool
-
-	if sub = p.subscriptions.Get(topicPattern); sub == nil {
-		return
-	}
-
-	if _, exist = sub.dispatchers[dispatcher]; !exist {
-		return
-	}
-	sub.dispatchers[dispatcher] = sub.dispatchers[dispatcher] - 1
-	count := sub.dispatchers[dispatcher]
-
-	if count < 1 {
-		delete(sub.dispatchers, dispatcher)
-
-		// Cancel any pending unsubscribe timer first (re-subscribe case)
-		p.unsubscribeMutex.Lock()
-		if timer, exists := p.unsubscribeTimers[topicPattern]; exists {
-			delete(p.unsubscribeTimers, topicPattern)
-			timer.Stop()
-		}
-		p.unsubscribeMutex.Unlock()
-
-		slog.Debug(
-			"[chain.pubsub] unsubscribe (last dispatcher removed, scheduling adapter unsubscribe)",
-			slog.String("topic", topicPattern),
-		)
-
-		// Schedule adapter unsubscribe after grace period
-		go scheduleUnsubscribe(topicPattern)
-	} else {
-		slog.Debug(
-			"[chain.pubsub] unsubscribe",
-			slog.String("topic", topicPattern),
-			slog.Int("remaining_dispatchers", count),
-		)
-	}
-}
-
-// Broadcast broadcasts message on given topic across the whole cluster.
-func Broadcast(topic string, message []byte, options ...*Option) (err error) {
-	var config *AdapterConfig
-	if config = GetAdapter(topic); config == nil {
-		return ErrNoAdapter
-	}
-
-	if config.Adapter.Name() == "dummy" {
-		dispatchMessage(topic, message, getSelfIDString())
-		return
-	}
-
-	opts := map[string]any{}
-	for k, v := range globalOptions {
-		opts[k] = v
-	}
-	for _, opt := range options {
-		opts[opt.key] = opt.value
-	}
-
-	msgToSend := message
-
-	// [messageType: byte] [from: 20 bytes] [msgToSend: ...]
-	msgToSend = append(append([]byte{byte(MessageTypeBroadcast)}, getSelfIDBytes()...), msgToSend...)
-
-	// Check if we have compression enabled
-	if !config.DisableCompression {
-		var compressed []byte
-		if compressed, err = compressPayload(msgToSend); err != nil {
-			slog.Warn(
-				"[chain.pubsub] compression failed",
-				slog.String("topic", topic),
-				slog.Int("original_size", len(msgToSend)),
-				slog.Any("error", err),
-			)
-		} else if len(compressed) < len(msgToSend) {
-			// Only use compression if it reduced the size
-			msgToSend = compressed
-		}
-	}
-
-	// Check if we have encryption enabled
-	if !config.DisableEncryption {
-		keyring := config.Keyring
-		if keyring == nil {
-			keyring = globalKeyring
-		}
-		var encrypted []byte
-		if encrypted, err = encryptPayload(keyring, msgToSend); err != nil {
-			slog.Error(
-				"[chain.pubsub] encryption failed",
-				slog.String("topic", topic),
-				slog.Int("original_size", len(msgToSend)),
-				slog.Any("error", err),
-			)
-			return errors.Join(errors.New("encryption of message failed"), err)
-		}
-		msgToSend = encrypted
-	}
-
-	// Always dispatch locally first (local-first design)
-	dispatchMessage(topic, message, getSelfIDString())
-
-	slog.Debug(
-		"[chain.pubsub] broadcast",
-		slog.String("topic", topic),
-		slog.Int("message_size", len(msgToSend)),
-	)
-
-	if err = config.Adapter.Broadcast(topic, msgToSend, opts); err != nil {
-		slog.Error(
-			"[chain.pubsub] adapter broadcast failed",
-			slog.String("topic", topic),
-			slog.Int("message_size", len(msgToSend)),
-			slog.Any("error", err),
-		)
-	}
-	return
-}
-
-// DirectBroadcast Broadcasts ServiceMsg on given topic to a given node.
-func DirectBroadcast(nodeId string, topic string, message []byte, options ...*Option) error {
-	// [messageType: byte] [from: 20 bytes] [message: ...]
-
-	nodeIdK, err := ksuid.Parse(nodeId)
-	if err != nil {
-		return err
-	}
-
-	// [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
-	buf := &bytes.Buffer{}
-	buf.Write(nodeIdK.Bytes())
-
-	topicNameLen := make([]byte, 4)
-	binary.BigEndian.PutUint32(topicNameLen, uint32(len(topic)))
-	buf.Write(topicNameLen)
-
-	buf.WriteString(topic)
-	buf.Write(message)
-
-	return broadcastMessage(MessageTypeDirectBroadcast, "direct:"+nodeId, buf.Bytes(), options...)
-}
-
-// Broadcast broadcasts message on given topic across the whole cluster.
-func broadcastMessage(msgType MessageType, topic string, message []byte, options ...*Option) (err error) {
-	var config *AdapterConfig
-	if config = GetAdapter(topic); config == nil {
-		return ErrNoAdapter
-	}
-
-	if config.Adapter.Name() == "dummy" {
-		dispatchMessage(topic, message, getSelfIDString())
-		return
-	}
-
-	opts := map[string]any{}
-	for k, v := range globalOptions {
-		opts[k] = v
-	}
-	for _, opt := range options {
-		opts[opt.key] = opt.value
-	}
-
-	// [messageType: byte] [from: 20 bytes] [message: ...]
-	// [messageType: byte] [from: 20 bytes] [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
-	buf := &bytes.Buffer{}
-	buf.WriteByte(byte(msgType))
-	buf.Write(getSelfIDBytes())
-	buf.Write(message)
-	msgToSend := buf.Bytes()
-
-	// Check if we have compression enabled
-	if !config.DisableCompression {
-		var compressed []byte
-		if compressed, err = compressPayload(msgToSend); err != nil {
-			slog.Warn(
-				"[chain.pubsub] compression failed",
-				slog.String("topic", topic),
-				slog.Int("original_size", len(msgToSend)),
-				slog.Any("error", err),
-			)
-		} else if len(compressed) < len(msgToSend) {
-			// Only use compression if it reduced the size
-			msgToSend = compressed
-		}
-	}
-
-	// Check if we have encryption enabled
-	if !config.DisableEncryption {
-		keyring := config.Keyring
-		if keyring == nil {
-			keyring = globalKeyring
-		}
-		var encrypted []byte
-		if encrypted, err = encryptPayload(keyring, msgToSend); err != nil {
-			return errors.Join(errors.New("encryption of message failed"), err)
-		}
-		msgToSend = encrypted
-	}
-
-	err = config.Adapter.Broadcast(topic, msgToSend, opts)
-	return
-}
-
-// Dispatch used by adapters, process and delivery messages coming from backend (redis, kafka, *MQ), decrypting and
-// decompressing if necessary.
-func Dispatch(topic string, message []byte) {
-	if len(message) == 0 {
-		slog.Warn(
-			"[chain.pubsub] received empty message",
-			slog.String("topic", topic),
-		)
-		return
-	}
-
-	if len(message) > MaxMessageSize {
-		slog.Warn(
-			"[chain.pubsub] message exceeds maximum size",
-			slog.String("topic", topic),
-			slog.Int("size", len(message)),
-			slog.Int("max", MaxMessageSize),
-		)
-		return
-	}
-
-	if config := GetAdapter(topic); config != nil {
-		// Read the message type
-		msgType := MessageType(message[0])
-
-		// Check if the message is encrypted
-		if msgType == MessageTypeEncrypt {
-			if config.DisableEncryption {
-				slog.Error(
-					"[chain.pubsub] remote message is encrypted and encryption is not configured",
-					slog.String("topic", topic),
-					slog.String("adapter", config.Adapter.Name()),
-				)
-				return
-			}
-
-			keyring := config.Keyring
-			if keyring == nil {
-				keyring = globalKeyring
-			}
-			plain, err := decryptPayload(keyring, message)
-			if err != nil {
-				slog.Error(
-					"[chain.pubsub] could not decrypt remote message",
-					slog.String("topic", topic),
-					slog.String("adapter", config.Adapter.Name()),
-					slog.Any("error", err),
-				)
-				return
-			}
-
-			// Reset message type and buf
-			msgType = MessageType(plain[0])
-			message = plain
-		} else if !config.DisableEncryption {
-			slog.Error(
-				"[chain.pubsub] encryption is configured but remote message is not encrypted",
-				slog.String("topic", topic),
-				slog.String("adapter", config.Adapter.Name()),
-			)
-			return
-		}
-
-		// Check if we have a compressed message
-		if msgType == MessageTypeCompress {
-			decompressed, err := decompressPayload(message)
-			if err != nil {
-				slog.Error(
-					"[chain.pubsub] could not decompress remote message",
-					slog.String("topic", topic),
-					slog.String("adapter", config.Adapter.Name()),
-					slog.Any("error", err),
-				)
-				return
-			}
-
-			// Reset message type and buf
-			msgType = MessageType(decompressed[0])
-			message = decompressed
-		}
-
-		// [messageType: byte] [from: 20 bytes] [message: ...]
-		// [messageType: byte] [from: 20 bytes] [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
-		message = message[1:]
-
-		if len(message) < 20 {
-			slog.Error(
-				"[chain.pubsub] invalid remote message length",
-				slog.String("topic", topic),
-				slog.String("adapter", config.Adapter.Name()),
-				slog.Int("message_len", len(message)),
-			)
-			return
-		}
-		fromBytes := message[:20]
-
-		fromID, err := ksuid.FromBytes(fromBytes)
-		if err != nil {
-			slog.Error(
-				"[chain.pubsub] invalid remote message from",
-				slog.String("topic", topic),
-				slog.String("adapter", config.Adapter.Name()),
-				slog.Any("error", err),
-			)
-			return
-		}
-		from := fromID.String()
-
-		// [message: ...]
-		// [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
-		message = message[20:]
-
-		// Check if is a direct broadcast
-		if msgType == MessageTypeDirectBroadcast {
-			if topic != getDirectTopic() {
-				slog.Error(
-					"[chain.pubsub] invalid topic for remote direct broadcast message",
-					slog.String("topic", topic),
-					slog.String("adapter", config.Adapter.Name()),
-					slog.String("expected", getDirectTopic()),
-				)
-				return
-			}
-
-			// [to: 20 bytes] [topicNameLen: uint] [topic: topicNameLen] [message: ...]
-			if len(message) < 25 {
-				slog.Error(
-					"[chain.pubsub] invalid remote direct broadcast length",
-					slog.String("topic", topic),
-					slog.String("adapter", config.Adapter.Name()),
-					slog.Int("message_len", len(message)),
-				)
-				return
-			}
-
-			toBytes := message[0:20]
-			message = message[20:]
-
-			if !bytes.Equal(getSelfIDBytes(), toBytes) {
-				slog.Error(
-					"[chain.pubsub] invalid remote direct broadcast destination",
-					slog.String("adapter", config.Adapter.Name()),
-				)
-				return
-			}
-
-			// [topicNameLen: uint] [topic: topicNameLen] [message: ...]
-			topicNameLen := int(binary.BigEndian.Uint32(message[0:4]))
-			message = message[4:]
-
-			if len(message) < topicNameLen {
-				slog.Error(
-					"[chain.pubsub] invalid remote direct broadcast length",
-					slog.String("adapter", config.Adapter.Name()),
-					slog.Int("message_len", len(message)),
-					slog.Int("expected_topic_len", topicNameLen),
-				)
-				return
-			}
-			topic = string(message[:topicNameLen])
-			message = message[topicNameLen:]
-		} else if msgType != MessageTypeBroadcast {
-			slog.Error(
-				"[chain.pubsub] invalid remote message type",
-				slog.String("topic", topic),
-				slog.String("adapter", config.Adapter.Name()),
-				slog.Uint64("message_type", uint64(msgType)),
-			)
-			return
-		}
-
-		dispatchMessage(topic, message, from)
-	}
-}
-
-// LocalBroadcast broadcasts message on given topic only for the current node.
-//
-// `topic` - The topic to broadcast to, ie: `"users:123"`
-// `message` - The payload of the broadcast
-func LocalBroadcast(topic string, message []byte) {
-	dispatchMessage(topic, message, getSelfIDString())
-}
-
-// SetAdapters configure the adapters topics.
-//
-// Allows the application to have instances specialized by topics.
-//
-// ## Example
-//
-//	SetAdapters([]AdapterConfig{
-//		{&RedisAdapter{Addr: "admin.redis-host:6379"}, []string{"admin:*"}},
-//		{&RedisAdapter{Addr: "global.redis-host:6379"}, []string{"*"}},
-//	})
-func SetAdapters(adapters []AdapterConfig) {
-
-	if config := GetAdapter(getDirectTopic()); config != nil {
-		// direct broadcast
-		config.Adapter.Unsubscribe(getDirectTopic())
-	}
-	defer trySubscribe(getDirectTopic())
-
-	p.adapters = &pkg.WildcardStore[*AdapterConfig]{}
-	for _, config := range adapters {
-		for _, topic := range config.Topics {
-			if err := p.adapters.Insert(topic, &config); err != nil {
-				panic(fmt.Sprintf("[chain.pubsub] invalid adapter config. Topic: %s, Error: %s", topic, err.Error()))
-			}
-		}
-	}
-}
-
-// GetAdapter Gets the adapter associated with a topic.
-func GetAdapter(topic string) *AdapterConfig {
-	if p.adapters == nil {
-		return nil
-	}
-	return p.adapters.Match(topic)
-}
-
-// trySubscribe subscribe the adapter on the given topic
-func trySubscribe(topic string) {
-	if config := GetAdapter(topic); config != nil {
-		config.Adapter.Subscribe(topic)
-	}
-}
-
-// scheduleUnsubscribe unsubscribe the adapter after 5 seconds
-func scheduleUnsubscribe(topic string) {
-	p.unsubscribeMutex.Lock()
-	if _, exist := p.unsubscribeTimers[topic]; exist {
-		p.unsubscribeMutex.Unlock()
-		return
-	}
-
-	timer := time.NewTimer(time.Second * 5)
-	p.unsubscribeTimers[topic] = timer
-	p.unsubscribeMutex.Unlock()
-
-	// wait
-	<-timer.C
-
-	p.unsubscribeMutex.Lock()
-	defer p.unsubscribeMutex.Unlock()
-
-	if _, exist := p.unsubscribeTimers[topic]; !exist {
-		// was removed by pubsub.trySubscribe
-		return
-	}
-	delete(p.unsubscribeTimers, topic)
-
-	if config := GetAdapter(topic); config != nil {
-		config.Adapter.Unsubscribe(topic)
-	}
-}
-
-// dispatchMessage deliver the message locally
-func dispatchMessage(topic string, message []byte, from string) {
-	go func() {
-		if from == "" {
-			from = getSelfIDString()
-		}
-
-		// get subscriptions & dispatchers
-		p.subscriptionsMutex.RLock()
-		// var sub *subscription
-		// var exist bool
-
-		subs := p.subscriptions.MatchAll(topic)
-		if len(subs) == 0 {
-			p.subscriptionsMutex.RUnlock()
-			// if we are still receiving this message, schedule removal
-			go scheduleUnsubscribe(topic)
-			return
-		}
-
-		// if sub, exist = p.subscriptions[topic]; !exist {
-		// 	p.subscriptionsMutex.RUnlock()
-		// 	// if we are still receiving this message, schedule removal
-		// 	go scheduleUnsubscribe(topic)
-		// 	return
-		// }
-
-		var dispatchers []Dispatcher
-		for _, sub := range subs {
-			for dispatchFunc, _ := range sub.dispatchers {
-				dispatchers = append(dispatchers, dispatchFunc)
-			}
-		}
-		p.subscriptionsMutex.RUnlock()
-
-		for _, dispatcher := range dispatchers {
-			dispatcher.Dispatch(topic, message, from)
-		}
-	}()
+// broadcastMessageForTest is exposed for testing.
+func broadcastMessageForTest(msgType MessageType, topic string, message []byte, options ...*Option) error {
+	return Default.broadcastMessage(msgType, topic, message, options...)
 }
