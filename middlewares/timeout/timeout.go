@@ -167,10 +167,10 @@ func New(config ...Config) chain.MiddlewareFunc {
 		defer cancel()
 
 		// Replace the request context so downstream code respects the timeout
-		ctx.Request = ctx.Request.WithContext(timeoutCtx)
+		ctx.ReplaceRequest(ctx.Request.WithContext(timeoutCtx))
 
 		// Replace the writer BEFORE starting the goroutine
-		ctx.Writer = wrapper
+		ctx.ReplaceWriter(wrapper)
 
 		// Execute the handler chain in a goroutine so we can detect timeout
 		errChan := make(chan error, 1)
@@ -191,7 +191,7 @@ func New(config ...Config) chain.MiddlewareFunc {
 
 			if !alreadyWritten {
 				// Restore original writer for custom error handler
-				ctx.Writer = origWriter
+				ctx.ReplaceWriter(origWriter)
 				if cfg.ErrorHandler != nil {
 					cfg.ErrorHandler(ctx)
 				} else {

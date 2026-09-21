@@ -105,24 +105,33 @@ const SOCKET = 'Socket';
 const CHANNEL = 'Channel';
 const TRANSPORT = 'Transport';
 
+export type EventListeners = Record<string, Function>;
+
+type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any ? A : never;
+
 /**
  * Copyright 2016 Andrey Sitnik <andrey@sitnik.ru>, https://github.com/ai/nanoevents/blob/main/LICENSE
  */
-export class Events<T> {
-    private readonly events: { [key: string]: Array<(...args: any) => void> } = {};
+export class Events<Listeners extends EventListeners> {
 
-    emit(event: string, ...args: any) {
+    private readonly events: Partial<{ [E in keyof Listeners]: Array<Listeners[E]> }> = {};
+
+    has<E extends keyof Listeners>(event: E): boolean {
+        return (this.events[event] || []).length > 0;
+    }
+
+    emit<E extends keyof Listeners>(event: E, ...args: ArgumentTypes<Listeners[E]>) {
         for (let callbacks = this.events[event] || [], i = 0, l = callbacks.length; i < l; i++) {
             callbacks[i](...args);
         }
     }
 
-    on(event: string, callback: (...args: any) => void): T {
+    on<E extends keyof Listeners>(event: E, callback: Listeners[E]): Events<Listeners> {
         this.events[event]?.push(callback) || (this.events[event] = [callback]);
         return (this as any);
     }
 
-    off(event: string, callback: any) {
+    off<E extends keyof Listeners>(event: E, callback: Listeners[E]) {
         let callbacks = this.events[event];
         if (callbacks) {
             let idx = callbacks.indexOf(callback);
@@ -141,10 +150,18 @@ interface Node {
     endpoint: string,
 };
 
+export type SockettListeners = {
+    'open': (t: Transport) => void;
+    'close': () => void;
+    'error': (error: any) => void;
+    'message': (message: Message) => void;
+    'message:duplicated': (message: Message) => void;
+};
+
 /**
  * Initializes the Socket
  */
-export class Socket extends Events<Socket> {
+export class Socket extends Events<SockettListeners> {
 
     private ref = 1;
     private state: SocketStateEnum;
@@ -153,7 +170,7 @@ export class Socket extends Events<Socket> {
     private transportListOld: Transport[];
     private disconnectIdleTimer: any;
     private readonly timeout: number;
-    private readonly channels: Channel[] = [];
+    private readonly channels: Channel<any>[] = [];
     private readonly duplicated: (msg: Message) => boolean;
     private readonly sendBuffer: Array<() => void> = [];
     private readonly sessionStorage: Storage;
@@ -348,7 +365,7 @@ export class Socket extends Events<Socket> {
      * @param options 
      * @returns 
      */
-    channel(topic: string, params: any = {}, options: ChannelOptions = {}): Channel {
+    channel<Listeners extends EventListeners>(topic: string, params: any = {}, options: ChannelOptions = {}): Channel<Listeners> {
         if (!this.isConnected()) {
             this.connect();
         }
@@ -360,7 +377,7 @@ export class Socket extends Events<Socket> {
         return channel;
     }
 
-    remove(channel: Channel) {
+    remove(channel: Channel<any>) {
         let idx = this.channels.indexOf(channel);
         if (idx >= 0) {
             this.channels.splice(idx, 1);
@@ -442,7 +459,7 @@ export class Socket extends Events<Socket> {
         }
     }
 
-    private onTransportClose(transport: Transport, event: any) {
+    private onTransportClose(transport: Transport) {
         if (transport == this.transport) {
             log(SOCKET, 'closed');
             this.state = SocketStateEnum.DISCONNECTED;
@@ -481,7 +498,17 @@ export class Socket extends Events<Socket> {
     }
 }
 
-export class Channel extends Events<Channel> {
+export type ChannelListeners = {
+    'join:ok': () => void;
+    'join:error': () => void;
+    'join:timeout': () => void;
+    '_close': () => void;
+    '_error': () => void;
+    '_reply': (payload: any, ref: any) => void;
+};
+
+// & CustomListeners
+export class Channel<Listeners extends EventListeners> extends Events<ChannelListeners> {
 
     private topic: string;
     private socket: Socket
@@ -589,7 +616,7 @@ export class Channel extends Events<Channel> {
             }
         })
 
-        this.on('_reply', (payload, ref) => {
+        this.on('_reply', (payload: any, ref: any) => {
             this.trigger(`chan_reply_${ref}`, payload);
         });
     }
@@ -608,7 +635,7 @@ export class Channel extends Events<Channel> {
      * @param timeout 
      * @returns 
      */
-    join(timeout = this.timeout): Channel {
+    join(timeout = this.timeout): Channel<Listeners> {
         if (this.joinedOnce) {
             throw new Error("tried to join multiple times. 'join' can only be called a single time per channel instance");
         } else {
@@ -725,6 +752,7 @@ export class Channel extends Events<Channel> {
             throw new Error("channel onMessage callbacks must return the payload, modified or unmodified");
         }
 
+        // @ts-ignore
         this.emit(event, handledPayload, ref, p_joinRef || this.getJoinRef());
     }
 
@@ -763,6 +791,12 @@ export class Channel extends Events<Channel> {
     }
 }
 
+export type PushListeners = {
+    'ok': () => void;
+    'error': () => void;
+    'timeout': () => void;
+};
+
 /**
  * a Push event
  */
@@ -773,15 +807,15 @@ export class Push {
     private timer: any;
     private timeout: number;
     private socket: Socket;
-    private channel: Channel;
+    private channel: Channel<any>;
     private received: any;
     private refEvent?: string;
     private transport?: Transport; // for _leave only
     private readonly event: string;
-    private readonly events = new Events();
+    private readonly events = new Events<PushListeners>();
     private readonly payload: any;
 
-    constructor(socket: Socket, channel: Channel, event: string, payload: any, timeout: number, transport?: Transport) {
+    constructor(socket: Socket, channel: Channel<any>, event: string, payload: any, timeout: number, transport?: Transport) {
         this.ref = socket.nextRef()
         this.event = event;
         this.payload = payload || {};
@@ -799,7 +833,7 @@ export class Push {
         return this.timeout
     }
 
-    on(event: string, callback: (...args: any) => void): Push {
+    on(event: keyof PushListeners, callback: (...args: any) => void): Push {
         if (this.hasReceived(event)) {
             queueMicrotask(callback.bind(null, this.received.response));
         } else {
@@ -831,7 +865,7 @@ export class Push {
     }
 
     reset() {
-        this.channel.off(this.refEvent, this.onRefEventCallback);
+        this.channel.off(this.refEvent as any, this.onRefEventCallback);
         this.ref = undefined;
         this.sent = false;
         this.refEvent = undefined;
@@ -845,7 +879,7 @@ export class Push {
         this.ref = this.socket.nextRef();
         this.refEvent = `chan_reply_${this.ref}`;
 
-        this.channel.on(this.refEvent, this.onRefEventCallback);
+        this.channel.on(this.refEvent as any, this.onRefEventCallback);
 
         this.timer = setTimeout(() => {
             this.trigger("timeout", {});
@@ -858,7 +892,7 @@ export class Push {
     }
 
     private onRefEventCallback = (payload: any) => {
-        this.channel.off(this.refEvent, this.onRefEventCallback);
+        this.channel.off(this.refEvent as any, this.onRefEventCallback);
         this.cancelTimeout();
         this.received = payload;
         let { status, response, _ref } = payload;
@@ -875,7 +909,14 @@ export class Push {
     }
 }
 
-export interface Transport extends Events<Transport> {
+export type TransportListeners = {
+    'open': (t: Transport, event: any) => void;
+    'error': (t: Transport, error: any) => void;
+    'message': (t: Transport, message: any) => void;
+    'close': (t: Transport, event: any) => void;
+};
+
+export interface Transport extends Events<TransportListeners> {
     send(data: any): void;
     endpoint(): string;
     connect(endpoint: string): void;
@@ -889,7 +930,7 @@ export interface TransportConstructor {
 /**
  * Channel transport using server-sent events
  */
-export class TransportSSE extends Events<Transport> implements Transport {
+export class TransportSSE extends Events<TransportListeners> implements Transport {
 
     private source: EventSource;
     private endpointRaw: string;
@@ -942,12 +983,12 @@ export class TransportSSE extends Events<Transport> implements Transport {
 
         this.source.onerror = (event) => {
             log(TRANSPORT, 'error', event);
-            this.emit('error', this);
+            this.emit('error', this, event);
         };
 
         this.source.onopen = (event) => {
             log(TRANSPORT, 'open', event);
-            this.emit('open', this);
+            this.emit('open', this, event);
         };
     }
 
@@ -957,11 +998,10 @@ export class TransportSSE extends Events<Transport> implements Transport {
         }
         log(TRANSPORT, 'close');
         this.source.close();
-        this.emit('close', this);
+        this.emit('close', this, null);
         this.source = null;
     }
 }
-
 
 export const Transports: { [key: string]: TransportConstructor } = {
     "SSE": TransportSSE

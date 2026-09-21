@@ -83,6 +83,20 @@ func (ctx *Context) Destroy() {
 	}
 }
 
+func (ctx *Context) ReplaceRequest(r *http.Request) {
+	if ctx.parent != nil {
+		ctx.parent.ReplaceRequest(r)
+	}
+	ctx.Request = r
+}
+
+func (ctx *Context) ReplaceWriter(w http.ResponseWriter) {
+	if ctx.parent != nil {
+		ctx.parent.ReplaceWriter(w)
+	}
+	ctx.Writer = w
+}
+
 func (ctx *Context) Child() *Context {
 	var child *Context
 	if ctx.router != nil {

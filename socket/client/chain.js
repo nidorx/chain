@@ -28,6 +28,9 @@ const CHANNEL = 'Channel';
 const TRANSPORT = 'Transport';
 export class Events {
     events = {};
+    has(event) {
+        return (this.events[event] || []).length > 0;
+    }
     emit(event, ...args) {
         for (let callbacks = this.events[event] || [], i = 0, l = callbacks.length; i < l; i++) {
             callbacks[i](...args);
@@ -288,7 +291,7 @@ export class Socket extends Events {
             }
         }
     }
-    onTransportClose(transport, event) {
+    onTransportClose(transport) {
         if (transport == this.transport) {
             log(SOCKET, 'closed');
             this.state = SocketStateEnum.DISCONNECTED;
@@ -652,11 +655,11 @@ export class TransportSSE extends Events {
         };
         this.source.onerror = (event) => {
             log(TRANSPORT, 'error', event);
-            this.emit('error', this);
+            this.emit('error', this, event);
         };
         this.source.onopen = (event) => {
             log(TRANSPORT, 'open', event);
-            this.emit('open', this);
+            this.emit('open', this, event);
         };
     }
     close() {
@@ -665,7 +668,7 @@ export class TransportSSE extends Events {
         }
         log(TRANSPORT, 'close');
         this.source.close();
-        this.emit('close', this);
+        this.emit('close', this, null);
         this.source = null;
     }
 }

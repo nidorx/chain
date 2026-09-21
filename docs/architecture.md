@@ -73,7 +73,13 @@ github.com/nidorx/chain/
 │   ├── message.go               # Message types
 │   ├── transport.go             # Transport interface
 │   ├── transport_sse.go         # SSE transport
-│   └── message_serializer.go    # Message serialization
+│   ├── message_serializer.go    # Message serialization
+│   ├── client-js-config.go      # Client JS/TS embed server
+│   └── client/                  # TypeScript client library
+│       ├── chain.ts             # Socket client
+│       ├── chain.js             # Compiled JavaScript
+│       ├── chain.js.map         # Source map
+│       └── README.md            # Client documentation
 ├── pkg/                         # Shared utilities
 │   ├── pathclean.go             # URL path cleaning
 │   └── wildcard_store.go        # Wildcard pattern matching
@@ -211,6 +217,42 @@ Handler
   │                       └── Broadcast → PubSub.Broadcast
   └── Channels[] (registered channel factories)
 ```
+
+### Browser Client → Socket Server
+
+The client-side TypeScript library (`socket/client/chain.ts`) connects to Chain socket servers over SSE:
+
+```
+Browser
+  ├── Socket (connection management, node discovery)
+  │     ├── TransportSSE (EventSource + fetch POST)
+  │     ├── Channel[] (topic multiplexing)
+  │     │     └── Push (send/reply with timeout)
+  │     ├── Retry (exponential backoff)
+  │     └── Events (on/off/emit)
+  └── History (sliding-window message deduplication)
+        │
+        ▼ (SSE stream + fetch POST)
+  Server Handler → Session → Socket → Channel → PubSub
+```
+
+Key client capabilities:
+
+- **Cluster-aware node discovery** — `getNodes` callback returns server endpoints; client auto-migrates between nodes
+- **Session persistence** — socket ID (`sid`) stored in `sessionStorage`, survives page navigations per tab
+- **Automatic reconnection** — configurable retry intervals for both socket and channel rejoin
+- **Message deduplication** — pluggable `duplicated` function with built-in `History` helper for time-window dedup
+- **Wire format** — JSON array `[kind, joinRef, ref, topic, event, payload]` with three message kinds: PUSH, REPLY, BROADCAST
+
+Client files:
+
+| File                     | Description                                    |
+|--------------------------|------------------------------------------------|
+| `socket/client/chain.ts` | TypeScript source                              |
+| `socket/client/chain.js` | Compiled JavaScript (served via `/chain.js`)   |
+| `socket/client-js-config.go` | Go embed handler serving `.ts`, `.js`, `.map` |
+
+See [Socket Client Documentation](../socket/client/README.md) for full API reference.
 
 
 ## Request Lifecycle
